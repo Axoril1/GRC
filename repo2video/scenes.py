@@ -664,6 +664,33 @@ html, body {{
 </html>"""
 
 
+def check_chromium() -> str:
+    """Verify that Playwright and its Chromium browser are installed and executable.
+
+    Returns:
+        Path string to the Chromium executable.
+
+    Raises:
+        SceneError: If Playwright or Chromium is not installed.
+    """
+    try:
+        with sync_playwright() as pw:
+            path = pw.chromium.executable_path
+            if not Path(path).is_file():
+                raise SceneError(
+                    "The Chromium browser for Playwright is not installed.",
+                    hint="Run: playwright install chromium",
+                )
+            return path
+    except SceneError:
+        raise
+    except Exception as exc:
+        raise SceneError(
+            f"Failed to check Chromium: {exc}",
+            hint="Run: playwright install chromium",
+        ) from exc
+
+
 def render_scenes(
     script: ScriptData,
     out_dir: Path,
