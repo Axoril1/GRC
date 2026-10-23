@@ -1,0 +1,29 @@
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Output directories
+output/
+
+# Model voice assets
+voices/*.onnx
+voices/*.onnx.json
+
+# Environment configuration
+.env
+
+# Testing and linting caches
+.pytest_cache/
+.ruff_cache/
+
+# Build and distribution
+build/
+dist/
+*.egg-info/
