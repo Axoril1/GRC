@@ -301,13 +301,22 @@ def extract_json(raw: str) -> str:
             else:
                 text = rest
 
-    start_idx = text.find("{")
-    if start_idx == -1:
+    start_idx_brace = text.find("{")
+    start_idx_bracket = text.find("[")
+
+    if start_idx_brace == -1 and start_idx_bracket == -1:
         tail = raw[-200:]
         raise LLMError(
             f"The model output was cut off or is not JSON. Output tail: {tail}",
             hint="Increase LLM_NUM_CTX, or use a larger model.",
         )
+
+    if start_idx_bracket != -1 and (start_idx_brace == -1 or start_idx_bracket < start_idx_brace):
+        start_idx = start_idx_bracket
+        open_char, close_char = "[", "]"
+    else:
+        start_idx = start_idx_brace
+        open_char, close_char = "{", "}"
 
     depth = 0
     in_string = False
@@ -327,9 +336,9 @@ def extract_json(raw: str) -> str:
             in_string = not in_string
             continue
         if not in_string:
-            if char == "{":
+            if char == open_char:
                 depth += 1
-            elif char == "}":
+            elif char == close_char:
                 depth -= 1
                 if depth == 0:
                     end_idx = idx + 1
