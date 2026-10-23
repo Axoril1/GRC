@@ -32,3 +32,8 @@ include = ["repo2video*"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.pytest.ini_options]
+markers = [
+    "browser: marks tests as requiring Playwright Chromium browser",
+]
