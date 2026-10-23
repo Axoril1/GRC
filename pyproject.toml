@@ -36,4 +36,5 @@ line-length = 100
 [tool.pytest.ini_options]
 markers = [
     "browser: marks tests as requiring Playwright Chromium browser",
+    "ffmpeg: marks tests as requiring FFmpeg and ffprobe on PATH",
 ]
