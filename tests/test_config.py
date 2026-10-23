@@ -22,6 +22,7 @@ ENV_KEYS = [
     "VIDEO_HEIGHT",
     "VIDEO_FPS",
     "SCENE_PAUSE_SECONDS",
+    "VOICE_SPEED",
 ]
 
 
@@ -51,6 +52,7 @@ def test_settings_defaults() -> None:
     assert settings.video_height == 1080
     assert settings.video_fps == 30
     assert settings.scene_pause_seconds == 0.6
+    assert settings.voice_speed == 1.0
 
 
 def test_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -69,6 +71,7 @@ def test_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VIDEO_HEIGHT", "720")
     monkeypatch.setenv("VIDEO_FPS", "60")
     monkeypatch.setenv("SCENE_PAUSE_SECONDS", "1.5")
+    monkeypatch.setenv("VOICE_SPEED", "1.25")
 
     get_settings.cache_clear()
     settings = get_settings()
@@ -87,6 +90,7 @@ def test_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.video_height == 720
     assert settings.video_fps == 60
     assert settings.scene_pause_seconds == 1.5
+    assert settings.voice_speed == 1.25
 
 
 def test_dotenv_loading_without_overwriting_real_variables(
@@ -190,3 +194,35 @@ def test_secrets_hidden_in_repr() -> None:
     repr_no_secrets = repr(settings_no_secrets)
     assert "github_token=None" in repr_no_secrets
     assert "llm_api_key=None" in repr_no_secrets
+
+
+def test_voice_speed_range_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify VOICE_SPEED enforces range between 0.5 and 1.5."""
+    # Too low
+    monkeypatch.setenv("VOICE_SPEED", "0.4")
+    get_settings.cache_clear()
+    with pytest.raises(ConfigError) as exc_info:
+        get_settings()
+    assert "VOICE_SPEED" in exc_info.value.message
+    assert "0.5 and 1.5" in exc_info.value.hint
+
+    # Too high
+    monkeypatch.setenv("VOICE_SPEED", "1.6")
+    get_settings.cache_clear()
+    with pytest.raises(ConfigError) as exc_info:
+        get_settings()
+    assert "VOICE_SPEED" in exc_info.value.message
+    assert "0.5 and 1.5" in exc_info.value.hint
+
+    # Invalid float
+    monkeypatch.setenv("VOICE_SPEED", "fast")
+    get_settings.cache_clear()
+    with pytest.raises(ConfigError) as exc_info:
+        get_settings()
+    assert "VOICE_SPEED" in exc_info.value.message
+
+    # Direct instantiation out of range
+    with pytest.raises(ConfigError):
+        Settings(voice_speed=0.2)
+    with pytest.raises(ConfigError):
+        Settings(voice_speed=2.0)

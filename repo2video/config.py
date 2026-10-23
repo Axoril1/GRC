@@ -109,6 +109,45 @@ def _parse_float(var_name: str, value_str: str | None, default: float) -> float:
     return val
 
 
+def _parse_float_range(
+    var_name: str,
+    value_str: str | None,
+    default: float,
+    min_val: float = 0.5,
+    max_val: float = 1.5,
+) -> float:
+    """Parse and validate a float configuration variable within a bounded range.
+
+    Args:
+        var_name: Name of the environment variable.
+        value_str: Raw string value from the environment.
+        default: Default value used when value_str is None.
+        min_val: Minimum allowed value (inclusive).
+        max_val: Maximum allowed value (inclusive).
+
+    Returns:
+        The validated float within [min_val, max_val].
+
+    Raises:
+        ConfigError: If value_str is not a valid float or outside the range.
+    """
+    if value_str is None:
+        return default
+    try:
+        val = float(value_str)
+    except ValueError as exc:
+        raise ConfigError(
+            f"Invalid number for {var_name}: {value_str!r}.",
+            hint=f"Set {var_name} to a number between {min_val} and {max_val}.",
+        ) from exc
+    if not (min_val <= val <= max_val):
+        raise ConfigError(
+            f"{var_name} must be between {min_val} and {max_val}, got {val}.",
+            hint=f"Set {var_name} to a number between {min_val} and {max_val}.",
+        )
+    return val
+
+
 def _parse_provider(var_name: str, value_str: str | None, default: str) -> str:
     """Parse and validate the LLM provider configuration variable.
 
@@ -154,6 +193,7 @@ class Settings:
         video_height: Output video height in pixels.
         video_fps: Output video frame rate.
         scene_pause_seconds: Duration in seconds to pause between scenes.
+        voice_speed: Speech rate multiplier for TTS audio (between 0.5 and 1.5).
     """
 
     github_token: str | None = None
@@ -170,6 +210,7 @@ class Settings:
     video_height: int = 1080
     video_fps: int = 30
     scene_pause_seconds: float = 0.6
+    voice_speed: float = 1.0
 
     def __post_init__(self) -> None:
         """Validate settings constraints upon initialization.
@@ -258,6 +299,16 @@ class Settings:
                 f"SCENE_PAUSE_SECONDS cannot be negative, got {self.scene_pause_seconds}.",
                 hint="Set SCENE_PAUSE_SECONDS to a non-negative number.",
             )
+        if not isinstance(self.voice_speed, (int, float)) or isinstance(self.voice_speed, bool):
+            raise ConfigError(
+                f"Invalid number for VOICE_SPEED: {self.voice_speed!r}.",
+                hint="Set VOICE_SPEED to a number between 0.5 and 1.5.",
+            )
+        if not (0.5 <= float(self.voice_speed) <= 1.5):
+            raise ConfigError(
+                f"VOICE_SPEED must be between 0.5 and 1.5, got {self.voice_speed}.",
+                hint="Set VOICE_SPEED to a number between 0.5 and 1.5.",
+            )
 
     def __repr__(self) -> str:
         """Return a string representation of Settings with secrets masked.
@@ -282,7 +333,8 @@ class Settings:
             f"video_width={self.video_width!r}, "
             f"video_height={self.video_height!r}, "
             f"video_fps={self.video_fps!r}, "
-            f"scene_pause_seconds={self.scene_pause_seconds!r}"
+            f"scene_pause_seconds={self.scene_pause_seconds!r}, "
+            f"voice_speed={self.voice_speed!r}"
             f")"
         )
 
@@ -311,13 +363,9 @@ def get_settings() -> Settings:
     llm_timeout_seconds = _parse_int(
         "LLM_TIMEOUT_SECONDS", os.environ.get("LLM_TIMEOUT_SECONDS"), 300
     )
-    llm_temperature = _parse_float(
-        "LLM_TEMPERATURE", os.environ.get("LLM_TEMPERATURE"), 0.4
-    )
+    llm_temperature = _parse_float("LLM_TEMPERATURE", os.environ.get("LLM_TEMPERATURE"), 0.4)
     llm_num_ctx = _parse_int("LLM_NUM_CTX", os.environ.get("LLM_NUM_CTX"), 8192)
-    piper_voice_path = Path(
-        os.environ.get("PIPER_VOICE_PATH", "voices/en_US-lessac-medium.onnx")
-    )
+    piper_voice_path = Path(os.environ.get("PIPER_VOICE_PATH", "voices/en_US-lessac-medium.onnx"))
     output_dir = Path(os.environ.get("OUTPUT_DIR", "output"))
     video_width = _parse_int("VIDEO_WIDTH", os.environ.get("VIDEO_WIDTH"), 1920)
     video_height = _parse_int("VIDEO_HEIGHT", os.environ.get("VIDEO_HEIGHT"), 1080)
@@ -325,6 +373,7 @@ def get_settings() -> Settings:
     scene_pause_seconds = _parse_float(
         "SCENE_PAUSE_SECONDS", os.environ.get("SCENE_PAUSE_SECONDS"), 0.6
     )
+    voice_speed = _parse_float_range("VOICE_SPEED", os.environ.get("VOICE_SPEED"), 1.0, 0.5, 1.5)
 
     return Settings(
         github_token=github_token,
@@ -341,4 +390,5 @@ def get_settings() -> Settings:
         video_height=video_height,
         video_fps=video_fps,
         scene_pause_seconds=scene_pause_seconds,
+        voice_speed=voice_speed,
     )
