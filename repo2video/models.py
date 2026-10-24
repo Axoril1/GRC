@@ -140,7 +140,9 @@ class RepoData(BaseRepoModel):
     stars: int = Field(default=0, ge=0, description="Star count.")
     languages: list[str] = Field(default_factory=list, description="Programming languages.")
     readme: str = Field(default="", max_length=6000, description="README excerpt.")
-    top_level: list[str] = Field(default_factory=list, max_length=30, description="Top-level entries.")
+    top_level: list[str] = Field(
+        default_factory=list, max_length=30, description="Top-level entries."
+    )
 
     @field_validator("name")
     @classmethod
@@ -211,9 +213,7 @@ class RepoData(BaseRepoModel):
             ValueError: If readme exceeds 6000 characters.
         """
         if len(v) > 6000:
-            raise ValueError(
-                f"Repository readme has {len(v)} characters, the limit is 6000."
-            )
+            raise ValueError(f"Repository readme has {len(v)} characters, the limit is 6000.")
         return v
 
     @field_validator("top_level")
@@ -231,9 +231,7 @@ class RepoData(BaseRepoModel):
             ValueError: If top_level has more than 30 items.
         """
         if len(v) > 30:
-            raise ValueError(
-                f"Repository top_level has {len(v)} items, the limit is 30."
-            )
+            raise ValueError(f"Repository top_level has {len(v)} items, the limit is 30.")
         return v
 
 
@@ -303,31 +301,21 @@ class Scene(BaseRepoModel):
             )
 
         if len(self.bullets) > 4:
-            raise ValueError(
-                f"Scene {sid}: bullets has {len(self.bullets)} items, the limit is 4."
-            )
+            raise ValueError(f"Scene {sid}: bullets has {len(self.bullets)} items, the limit is 4.")
         for bullet in self.bullets:
             b_words = word_count(bullet)
             if b_words > 8:
-                raise ValueError(
-                    f"Scene {sid}: bullet has {b_words} words, the limit is 8."
-                )
+                raise ValueError(f"Scene {sid}: bullet has {b_words} words, the limit is 8.")
 
         n_words = word_count(self.narration)
         if n_words < 15:
-            raise ValueError(
-                f"Scene {sid}: narration has {n_words} words, the minimum is 15."
-            )
+            raise ValueError(f"Scene {sid}: narration has {n_words} words, the minimum is 15.")
         if n_words > 40:
-            raise ValueError(
-                f"Scene {sid}: narration has {n_words} words, the limit is 40."
-            )
+            raise ValueError(f"Scene {sid}: narration has {n_words} words, the limit is 40.")
 
         code_lines = self.code.splitlines()
         if len(code_lines) > 6:
-            raise ValueError(
-                f"Scene {sid}: code has {len(code_lines)} lines, the limit is 6."
-            )
+            raise ValueError(f"Scene {sid}: code has {len(code_lines)} lines, the limit is 6.")
 
         return self
 
@@ -420,8 +408,6 @@ class ScriptData(BaseRepoModel):
         # 4. Total narration is at most 220 words
         total_words = sum(word_count(s.narration) for s in self.scenes)
         if total_words > 220:
-            raise ValueError(
-                f"Total narration has {total_words} words, the limit is 220."
-            )
+            raise ValueError(f"Total narration has {total_words} words, the limit is 220.")
 
         return self

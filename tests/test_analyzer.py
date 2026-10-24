@@ -207,7 +207,9 @@ url = "[link](http://example.com)"
 def test_clean_readme_never_cuts_inside_fence() -> None:
     """Verify clean_readme never cuts inside a fenced code block."""
     filler = "Word " * 50  # ~250 chars
-    code_block = "\n\n```python\ndef run_pipeline():\n    for i in range(100):\n        process(i)\n```\n\n"
+    code_block = (
+        "\n\n```python\ndef run_pipeline():\n    for i in range(100):\n        process(i)\n```\n\n"
+    )
     more_text = "Trailing content that exceeds the limit " * 30
 
     full_text = f"{filler}{code_block}{more_text}"
@@ -299,9 +301,7 @@ def test_analyze_tree_failure_still_succeeds() -> None:
             "/repos/owner/repo/readme": FakeResponse(
                 status_code=200, text="# My Readme\nDocumentation here."
             ),
-            "/repos/owner/repo/languages": FakeResponse(
-                status_code=200, json_data={"Python": 500}
-            ),
+            "/repos/owner/repo/languages": FakeResponse(status_code=200, json_data={"Python": 500}),
             "/repos/owner/repo": FakeResponse(
                 status_code=200,
                 json_data={
@@ -325,7 +325,9 @@ def test_analyze_retry_503_then_200() -> None:
         routes={
             "/repos/owner/repo/readme": FakeResponse(status_code=200, text="# Readme"),
             "/repos/owner/repo/languages": FakeResponse(status_code=200, json_data={"Python": 100}),
-            "/repos/owner/repo/git/trees/main": FakeResponse(status_code=200, json_data={"tree": []}),
+            "/repos/owner/repo/git/trees/main": FakeResponse(
+                status_code=200, json_data={"tree": []}
+            ),
             "/repos/owner/repo": [
                 FakeResponse(status_code=503),
                 FakeResponse(
@@ -400,7 +402,9 @@ def test_no_readme_and_no_description_raises_analyzer_error() -> None:
         routes={
             "/repos/owner/repo/readme": FakeResponse(status_code=404),
             "/repos/owner/repo/languages": FakeResponse(status_code=200, json_data={}),
-            "/repos/owner/repo/git/trees/main": FakeResponse(status_code=200, json_data={"tree": []}),
+            "/repos/owner/repo/git/trees/main": FakeResponse(
+                status_code=200, json_data={"tree": []}
+            ),
             "/repos/owner/repo": FakeResponse(
                 status_code=200,
                 json_data={

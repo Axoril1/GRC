@@ -245,9 +245,11 @@ def test_script_scenes_count_bounds() -> None:
     assert "between 5 and 8 scenes" in format_validation_error(exc_info.value)
 
     # 9 scenes is too many
-    nine_scenes = [_make_scene(1, "title")] + [
-        _make_scene(i, "feature") for i in range(2, 9)
-    ] + [_make_scene(9, "outro")]
+    nine_scenes = (
+        [_make_scene(1, "title")]
+        + [_make_scene(i, "feature") for i in range(2, 9)]
+        + [_make_scene(9, "outro")]
+    )
     with pytest.raises(ValidationError) as exc_info:
         ScriptData(title="Test", scenes=nine_scenes)
     assert "between 5 and 8 scenes" in format_validation_error(exc_info.value)
@@ -282,8 +284,13 @@ def test_extra_fields_ignored() -> None:
 
     script = ScriptData(
         title="Test Title",
-        scenes=[_make_scene(1, "title"), _make_scene(2, "problem"), _make_scene(3, "feature"),
-                _make_scene(4, "howto"), _make_scene(5, "outro")],
+        scenes=[
+            _make_scene(1, "title"),
+            _make_scene(2, "problem"),
+            _make_scene(3, "feature"),
+            _make_scene(4, "howto"),
+            _make_scene(5, "outro"),
+        ],
         unexpected_extra_property=42,
     )
     assert not hasattr(script, "unexpected_extra_property")
@@ -310,8 +317,13 @@ def test_whitespace_stripped() -> None:
 
     script = ScriptData(
         title="   Trimmed Title   ",
-        scenes=[scene, _make_scene(2, "problem"), _make_scene(3, "feature"),
-                _make_scene(4, "howto"), _make_scene(5, "outro")],
+        scenes=[
+            scene,
+            _make_scene(2, "problem"),
+            _make_scene(3, "feature"),
+            _make_scene(4, "howto"),
+            _make_scene(5, "outro"),
+        ],
     )
     assert script.title == "Trimmed Title"
 

@@ -23,36 +23,40 @@ logger = logging.getLogger(__name__)
 
 EXAMPLE_HINT = "Provide a valid GitHub repository URL, e.g. 'https://github.com/owner/repo'."
 
-RESERVED_SEGMENTS = frozenset({
-    "about",
-    "explore",
-    "features",
-    "login",
-    "marketplace",
-    "notifications",
-    "orgs",
-    "pricing",
-    "settings",
-    "sponsors",
-    "topics",
-})
+RESERVED_SEGMENTS = frozenset(
+    {
+        "about",
+        "explore",
+        "features",
+        "login",
+        "marketplace",
+        "notifications",
+        "orgs",
+        "pricing",
+        "settings",
+        "sponsors",
+        "topics",
+    }
+)
 
-NOISE_ITEMS = frozenset({
-    ".git",
-    ".github",
-    ".gitignore",
-    ".gitattributes",
-    ".ds_store",
-    "node_modules",
-    "__pycache__",
-    ".idea",
-    ".vscode",
-    "package-lock.json",
-    "yarn.lock",
-    "pnpm-lock.yaml",
-    "poetry.lock",
-    "cargo.lock",
-})
+NOISE_ITEMS = frozenset(
+    {
+        ".git",
+        ".github",
+        ".gitignore",
+        ".gitattributes",
+        ".ds_store",
+        "node_modules",
+        "__pycache__",
+        ".idea",
+        ".vscode",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "cargo.lock",
+    }
+)
 
 BADGE_KEYWORDS = (
     "shields.io",
