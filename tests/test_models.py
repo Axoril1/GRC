@@ -1,5 +1,6 @@
 """Tests for repo2video data models and validation."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,10 @@ from pydantic import ValidationError
 
 from repo2video.errors import Repo2VideoError
 from repo2video.models import (
+    ArchitectureSpec,
+    EdgeSpec,
+    FocusRange,
+    NodeSpec,
     RepoData,
     Scene,
     ScriptData,
@@ -88,6 +93,65 @@ def test_repo_data_round_trip(tmp_path: Path) -> None:
     loaded = RepoData.load(file_path)
     assert loaded == repo
     assert loaded.name == "repo2video"
+
+
+def test_v1_scenes_json_still_validates(tmp_path: Path) -> None:
+    """Verify that a legacy v1 scenes.json file still loads and validates cleanly."""
+    v1_content = {
+        "title": "Legacy Project Video",
+        "scenes": [
+            {
+                "id": 1,
+                "type": "title",
+                "heading": "Welcome to Project",
+                "bullets": ["Open source", "Python powered"],
+                "narration": "Welcome to this legacy demo video showcasing our python project in full action across multiple developer platforms today.",
+                "code": "",
+            },
+            {
+                "id": 2,
+                "type": "problem",
+                "heading": "The Pain Point",
+                "bullets": ["Complex setup", "Slow builds"],
+                "narration": "Developers struggle every day with slow manual video creation pipelines that take hours to run in production.",
+                "code": "",
+            },
+            {
+                "id": 3,
+                "type": "feature",
+                "heading": "Instant Conversion",
+                "bullets": ["Automated slides", "Fast speech"],
+                "narration": "Our engine automates the entire process transforming your repository source code into smooth video presentation files.",
+                "code": "",
+            },
+            {
+                "id": 4,
+                "type": "howto",
+                "heading": "Getting Started",
+                "bullets": ["Single pip install", "Run CLI"],
+                "narration": "Install with pip in seconds and run the simple command line tool to produce your complete video.",
+                "code": "pip install repo2video",
+            },
+            {
+                "id": 5,
+                "type": "outro",
+                "heading": "Try It Today",
+                "bullets": ["Free software", "MIT license"],
+                "narration": "Check out the repository on GitHub today and star the project to support our ongoing open source development.",
+                "code": "",
+            },
+        ],
+    }
+    json_path = tmp_path / "v1_scenes.json"
+    json_path.write_text(json.dumps(v1_content, indent=2), encoding="utf-8")
+
+    loaded = ScriptData.load(json_path)
+    assert loaded.title == "Legacy Project Video"
+    assert len(loaded.scenes) == 5
+    assert loaded.scenes[0].type == "title"
+    assert loaded.scenes[0].media_id is None
+    assert loaded.scenes[0].architecture is None
+    assert loaded.scenes[-1].type == "outro"
 
 
 def test_scene_limit_heading_zero_words() -> None:
@@ -184,6 +248,260 @@ def test_scene_id_less_than_one() -> None:
     assert "Scene id must be at least 1" in msg
 
 
+def test_new_types_missing_required_fields_give_clear_messages() -> None:
+    """Verify each visual scene type gives a clear plain-English message when required field is missing."""
+    # media needs media_id
+    with pytest.raises(ValidationError) as exc_info:
+        _make_scene(scene_id=2, scene_type="media", media_id=None)
+    assert "Scene 2: type media needs a media_id." in format_validation_error(exc_info.value)
+
+    # code needs file_id
+    with pytest.raises(ValidationError) as exc_info:
+        _make_scene(scene_id=3, scene_type="code", file_id=None)
+    assert "Scene 3: type code needs a file_id." in format_validation_error(exc_info.value)
+
+    # terminal needs terminal_id
+    with pytest.raises(ValidationError) as exc_info:
+        _make_scene(scene_id=4, scene_type="terminal", terminal_id=None)
+    assert "Scene 4: type terminal needs a terminal_id." in format_validation_error(exc_info.value)
+
+    # architecture needs architecture
+    with pytest.raises(ValidationError) as exc_info:
+        _make_scene(scene_id=5, scene_type="architecture", architecture=None)
+    assert "Scene 5: type architecture needs architecture." in format_validation_error(
+        exc_info.value
+    )
+
+    # stats needs 2 to 4 stat_keys
+    with pytest.raises(ValidationError) as exc_info:
+        _make_scene(scene_id=6, scene_type="stats", stat_keys=[])
+    assert "Scene 6: type stats needs 2 to 4 stat_keys." in format_validation_error(exc_info.value)
+
+    with pytest.raises(ValidationError) as exc_info:
+        _make_scene(scene_id=7, scene_type="stats", stat_keys=["stars"])
+    assert "Scene 7: type stats needs 2 to 4 stat_keys." in format_validation_error(exc_info.value)
+
+
+def test_limits_per_type() -> None:
+    """Verify script limits: at most 2 media, 2 code, 1 terminal, 1 architecture, 1 stats."""
+    # 3 media scenes should fail
+    arch = ArchitectureSpec(
+        nodes=[
+            NodeSpec(id="cli", label="CLI Tool"),
+            NodeSpec(id="core", label="Core Engine"),
+            NodeSpec(id="out", label="Output Store"),
+        ],
+        edges=[
+            EdgeSpec(source="cli", target="core", label="calls"),
+            EdgeSpec(source="core", target="out", label="writes"),
+        ],
+    )
+    scenes_3_media = [
+        _make_scene(1, "title"),
+        _make_scene(2, "media", media_id="m1"),
+        _make_scene(3, "media", media_id="m2"),
+        _make_scene(4, "media", media_id="m3"),
+        _make_scene(5, "problem"),
+        _make_scene(6, "outro"),
+    ]
+    with pytest.raises(ValidationError) as exc_info:
+        ScriptData(title="Test", scenes=scenes_3_media)
+    assert "at most 2 media scenes" in format_validation_error(exc_info.value)
+
+    # 3 code scenes should fail
+    scenes_3_code = [
+        _make_scene(1, "title"),
+        _make_scene(2, "code", file_id="f1"),
+        _make_scene(3, "code", file_id="f2"),
+        _make_scene(4, "code", file_id="f3"),
+        _make_scene(5, "problem"),
+        _make_scene(6, "outro"),
+    ]
+    with pytest.raises(ValidationError) as exc_info:
+        ScriptData(title="Test", scenes=scenes_3_code)
+    assert "at most 2 code scenes" in format_validation_error(exc_info.value)
+
+    # 2 terminal scenes should fail
+    scenes_2_term = [
+        _make_scene(1, "title"),
+        _make_scene(2, "terminal", terminal_id="t1"),
+        _make_scene(3, "terminal", terminal_id="t2"),
+        _make_scene(4, "problem"),
+        _make_scene(5, "feature"),
+        _make_scene(6, "outro"),
+    ]
+    with pytest.raises(ValidationError) as exc_info:
+        ScriptData(title="Test", scenes=scenes_2_term)
+    assert "at most 1 terminal scene" in format_validation_error(exc_info.value)
+
+    # 2 architecture scenes should fail
+    scenes_2_arch = [
+        _make_scene(1, "title"),
+        _make_scene(2, "architecture", architecture=arch),
+        _make_scene(3, "architecture", architecture=arch),
+        _make_scene(4, "problem"),
+        _make_scene(5, "feature"),
+        _make_scene(6, "outro"),
+    ]
+    with pytest.raises(ValidationError) as exc_info:
+        ScriptData(title="Test", scenes=scenes_2_arch)
+    assert "at most 1 architecture scene" in format_validation_error(exc_info.value)
+
+    # 2 stats scenes should fail
+    scenes_2_stats = [
+        _make_scene(1, "title"),
+        _make_scene(2, "stats", stat_keys=["stars", "forks"]),
+        _make_scene(3, "stats", stat_keys=["issues", "license"]),
+        _make_scene(4, "problem"),
+        _make_scene(5, "feature"),
+        _make_scene(6, "outro"),
+    ]
+    with pytest.raises(ValidationError) as exc_info:
+        ScriptData(title="Test", scenes=scenes_2_stats)
+    assert "at most 1 stats scene" in format_validation_error(exc_info.value)
+
+
+def test_focus_validation() -> None:
+    """Verify focus line range validation rules."""
+    # Overlap allowed
+    r1 = FocusRange(start=1, end=5)
+    r2 = FocusRange(start=3, end=8)
+    assert r1.start == 1 and r1.end == 5
+    assert r2.start == 3 and r2.end == 8
+
+    # More than 8 lines rejected (e.g. 1 to 10 spans 10 lines)
+    with pytest.raises(ValidationError) as exc_info:
+        FocusRange(start=1, end=10)
+    assert "spans 10 lines, the limit is 8" in format_validation_error(exc_info.value)
+
+    # Start greater than end rejected
+    with pytest.raises(ValidationError) as exc_info:
+        FocusRange(start=5, end=2)
+    assert "must be less than or equal to end line" in format_validation_error(exc_info.value)
+
+    # More than 4 focus items on a Scene rejected
+    with pytest.raises(ValidationError) as exc_info:
+        _make_scene(
+            scene_id=3,
+            scene_type="code",
+            file_id="f1",
+            focus=[FocusRange(start=i, end=i) for i in range(1, 6)],
+        )
+    assert "focus has 5 items, the limit is 4" in format_validation_error(exc_info.value)
+
+
+def test_architecture_validation() -> None:
+    """Verify architecture specification validation rules."""
+    # Too few nodes (< 3)
+    with pytest.raises(ValidationError) as exc_info:
+        ArchitectureSpec(
+            nodes=[
+                NodeSpec(id="a", label="A"),
+                NodeSpec(id="b", label="B"),
+            ],
+            edges=[],
+        )
+    assert "between 3 and 8 nodes" in format_validation_error(exc_info.value)
+
+    # Too many nodes (> 8)
+    with pytest.raises(ValidationError) as exc_info:
+        ArchitectureSpec(
+            nodes=[NodeSpec(id=f"n{i}", label=f"Node {i}") for i in range(9)],
+            edges=[],
+        )
+    assert "between 3 and 8 nodes" in format_validation_error(exc_info.value)
+
+    # Duplicate node ids
+    with pytest.raises(ValidationError) as exc_info:
+        ArchitectureSpec(
+            nodes=[
+                NodeSpec(id="core", label="Core One"),
+                NodeSpec(id="core", label="Core Two"),
+                NodeSpec(id="out", label="Output"),
+            ],
+            edges=[],
+        )
+    assert "unique ids" in format_validation_error(exc_info.value)
+
+    # Unknown edge ends
+    with pytest.raises(ValidationError) as exc_info:
+        ArchitectureSpec(
+            nodes=[
+                NodeSpec(id="a", label="A"),
+                NodeSpec(id="b", label="B"),
+                NodeSpec(id="c", label="C"),
+            ],
+            edges=[EdgeSpec(source="a", target="ghost", label="calls")],
+        )
+    assert "does not exist in nodes" in format_validation_error(exc_info.value)
+
+    # Isolated nodes when total edges >= 2
+    with pytest.raises(ValidationError) as exc_info:
+        ArchitectureSpec(
+            nodes=[
+                NodeSpec(id="a", label="A"),
+                NodeSpec(id="b", label="B"),
+                NodeSpec(id="c", label="C"),
+            ],
+            edges=[
+                EdgeSpec(source="a", target="b", label="calls"),
+                EdgeSpec(source="b", target="a", label="returns"),
+            ],
+        )
+    assert "isolated nodes: c" in format_validation_error(exc_info.value)
+
+    # Fewer than 2 edges allows isolated nodes
+    spec_single_edge = ArchitectureSpec(
+        nodes=[
+            NodeSpec(id="a", label="A"),
+            NodeSpec(id="b", label="B"),
+            NodeSpec(id="c", label="C"),
+        ],
+        edges=[EdgeSpec(source="a", target="b", label="calls")],
+    )
+    assert len(spec_single_edge.edges) == 1
+
+
+def test_visual_script_scene_count_bounds() -> None:
+    """Verify script scene count bounds for visual vs plain scripts."""
+    # Plain script allows 5 to 8
+    plain_5 = [
+        _make_scene(1, "title"),
+        _make_scene(2, "problem"),
+        _make_scene(3, "feature"),
+        _make_scene(4, "howto"),
+        _make_scene(5, "outro"),
+    ]
+    assert len(ScriptData(title="T", scenes=plain_5).scenes) == 5
+
+    # 5 scenes with a visual scene fails (visual requires 6 to 9)
+    vis_5 = [
+        _make_scene(1, "title"),
+        _make_scene(2, "problem"),
+        _make_scene(3, "media", media_id="m1"),
+        _make_scene(4, "howto"),
+        _make_scene(5, "outro"),
+    ]
+    with pytest.raises(ValidationError) as exc_info:
+        ScriptData(title="T", scenes=vis_5)
+    assert "between 6 and 9 scenes" in format_validation_error(exc_info.value)
+
+    # 6 to 9 scenes with visual scene succeeds
+    vis_9 = (
+        [_make_scene(1, "title"), _make_scene(2, "media", media_id="m1")]
+        + [_make_scene(i, "feature") for i in range(3, 9)]
+        + [_make_scene(9, "outro")]
+    )
+    assert len(ScriptData(title="T", scenes=vis_9).scenes) == 9
+
+    # 10 scenes with visual scene fails
+    vis_10 = vis_9 + [_make_scene(10, "outro")]
+    vis_10[-2].type = "feature"
+    with pytest.raises(ValidationError) as exc_info:
+        ScriptData(title="T", scenes=vis_10)
+    assert "between 6 and 9 scenes" in format_validation_error(exc_info.value)
+
+
 def test_script_wrong_first_scene_type() -> None:
     """Verify first scene must be type title."""
     scenes = [
@@ -232,7 +550,7 @@ def test_script_non_sequential_ids() -> None:
 
 
 def test_script_scenes_count_bounds() -> None:
-    """Verify script must have 5 to 8 scenes."""
+    """Verify script must have 5 to 8 scenes for plain scripts."""
     # 4 scenes is too few
     four_scenes = [
         _make_scene(1, "title"),
@@ -244,7 +562,7 @@ def test_script_scenes_count_bounds() -> None:
         ScriptData(title="Test", scenes=four_scenes)
     assert "between 5 and 8 scenes" in format_validation_error(exc_info.value)
 
-    # 9 scenes is too many
+    # 9 plain scenes is too many
     nine_scenes = (
         [_make_scene(1, "title")]
         + [_make_scene(i, "feature") for i in range(2, 9)]
@@ -255,11 +573,11 @@ def test_script_scenes_count_bounds() -> None:
     assert "between 5 and 8 scenes" in format_validation_error(exc_info.value)
 
 
-def test_script_narration_total_over_220_words() -> None:
-    """Verify total narration words over 220 fails validation."""
-    # 6 scenes with 38 words each = 228 words
+def test_script_narration_total_over_240_words() -> None:
+    """Verify total narration words over 240 fails validation while 228 words passes."""
+    # 6 scenes with 38 words each = 228 words (passed in v2!)
     narr_38 = " ".join(["word"] * 38)
-    scenes = [
+    scenes_228 = [
         _make_scene(1, "title", narration=narr_38),
         _make_scene(2, "problem", narration=narr_38),
         _make_scene(3, "feature", narration=narr_38),
@@ -267,10 +585,24 @@ def test_script_narration_total_over_220_words() -> None:
         _make_scene(5, "howto", narration=narr_38),
         _make_scene(6, "outro", narration=narr_38),
     ]
+    valid_script = ScriptData(title="Test", scenes=scenes_228)
+    assert valid_script is not None
+
+    # 7 scenes with 36 words each = 252 words (> 240 words fails)
+    narr_36 = " ".join(["word"] * 36)
+    scenes_252 = [
+        _make_scene(1, "title", narration=narr_36),
+        _make_scene(2, "problem", narration=narr_36),
+        _make_scene(3, "feature", narration=narr_36),
+        _make_scene(4, "feature", narration=narr_36),
+        _make_scene(5, "feature", narration=narr_36),
+        _make_scene(6, "howto", narration=narr_36),
+        _make_scene(7, "outro", narration=narr_36),
+    ]
     with pytest.raises(ValidationError) as exc_info:
-        ScriptData(title="Test", scenes=scenes)
+        ScriptData(title="Test", scenes=scenes_252)
     msg = format_validation_error(exc_info.value)
-    assert "Total narration has 228 words, the limit is 220." in msg
+    assert "Total narration has 252 words, the limit is 240." in msg
 
 
 def test_extra_fields_ignored() -> None:

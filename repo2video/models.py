@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
@@ -10,7 +12,21 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from repo2video.errors import Repo2VideoError
 
-VALID_SCENE_TYPES = ("title", "problem", "feature", "howto", "outro")
+V1_SCENE_TYPES = ("title", "problem", "feature", "howto", "outro")
+V2_SCENE_TYPES = ("media", "code", "terminal", "architecture", "stats")
+VALID_SCENE_TYPES = V1_SCENE_TYPES + V2_SCENE_TYPES
+
+VALID_STAT_KEYS = (
+    "stars",
+    "forks",
+    "issues",
+    "license",
+    "updated",
+    "languages",
+    "topics",
+)
+
+VALID_NODE_GROUPS = ("input", "core", "output", "storage", "external")
 
 
 def word_count(text: str) -> int:
@@ -119,6 +135,27 @@ class BaseRepoModel(BaseModel):
                 f"Validation failed for {cls.__name__} in {p}:\n{formatted}",
                 hint=f"Update {p} to adhere to the {cls.__name__} schema.",
             ) from exc
+
+
+@dataclass
+class MediaAsset:
+    """Downloaded media asset descriptor.
+
+    Attributes:
+        id: Identifier matching a MediaRef id or screenshot (e.g. m1, h1).
+        kind: Media kind ('image' or 'clip').
+        alt: Alternative description text (may be empty).
+        origin: Source origin ('readme' or 'homepage').
+        width: Image or video width in pixels.
+        height: Image or video height in pixels.
+    """
+
+    id: str
+    kind: str = "image"
+    alt: str = ""
+    origin: str = "readme"
+    width: int = 0
+    height: int = 0
 
 
 class MediaRef(BaseRepoModel):
@@ -271,17 +308,7 @@ class RepoData(BaseRepoModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        """Validate repository name is non-empty.
-
-        Args:
-            v: Raw repository name string.
-
-        Returns:
-            Validated string.
-
-        Raises:
-            ValueError: If name is empty.
-        """
+        """Validate repository name is non-empty."""
         if not v:
             raise ValueError("Repository name cannot be empty.")
         return v
@@ -289,17 +316,7 @@ class RepoData(BaseRepoModel):
     @field_validator("owner")
     @classmethod
     def validate_owner(cls, v: str) -> str:
-        """Validate repository owner is non-empty.
-
-        Args:
-            v: Raw repository owner string.
-
-        Returns:
-            Validated string.
-
-        Raises:
-            ValueError: If owner is empty.
-        """
+        """Validate repository owner is non-empty."""
         if not v:
             raise ValueError("Repository owner cannot be empty.")
         return v
@@ -307,17 +324,7 @@ class RepoData(BaseRepoModel):
     @field_validator("stars")
     @classmethod
     def validate_stars(cls, v: int) -> int:
-        """Validate repository stars is non-negative.
-
-        Args:
-            v: Raw star count.
-
-        Returns:
-            Validated star count.
-
-        Raises:
-            ValueError: If stars is negative.
-        """
+        """Validate repository stars is non-negative."""
         if v < 0:
             raise ValueError(f"Repository stars cannot be negative, got {v}.")
         return v
@@ -325,17 +332,7 @@ class RepoData(BaseRepoModel):
     @field_validator("readme")
     @classmethod
     def validate_readme(cls, v: str) -> str:
-        """Validate repository readme length.
-
-        Args:
-            v: README string.
-
-        Returns:
-            Validated string.
-
-        Raises:
-            ValueError: If readme exceeds 6000 characters.
-        """
+        """Validate repository readme length."""
         if len(v) > 6000:
             raise ValueError(f"Repository readme has {len(v)} characters, the limit is 6000.")
         return v
@@ -343,17 +340,7 @@ class RepoData(BaseRepoModel):
     @field_validator("top_level")
     @classmethod
     def validate_top_level(cls, v: list[str]) -> list[str]:
-        """Validate repository top_level items count.
-
-        Args:
-            v: List of top level files/directories.
-
-        Returns:
-            Validated list.
-
-        Raises:
-            ValueError: If top_level has more than 30 items.
-        """
+        """Validate repository top_level items count."""
         if len(v) > 30:
             raise ValueError(f"Repository top_level has {len(v)} items, the limit is 30.")
         return v
@@ -361,20 +348,157 @@ class RepoData(BaseRepoModel):
     @field_validator("topics")
     @classmethod
     def validate_topics(cls, v: list[str]) -> list[str]:
-        """Validate topics item count.
-
-        Args:
-            v: List of topics.
-
-        Returns:
-            Validated list.
-
-        Raises:
-            ValueError: If topics has more than 10 items.
-        """
+        """Validate topics item count."""
         if len(v) > 10:
             raise ValueError(f"Repository topics has {len(v)} items, the limit is 10.")
         return v
+
+
+class FocusRange(BaseRepoModel):
+    """Line number range to highlight in a code scene.
+
+    Attributes:
+        start: 1-based inclusive start line number.
+        end: 1-based inclusive end line number.
+    """
+
+    start: int = Field(..., ge=1, description="1-based inclusive start line number.")
+    end: int = Field(..., ge=1, description="1-based inclusive end line number.")
+
+    @model_validator(mode="after")
+    def validate_range(self) -> Self:
+        """Validate that start <= end and the span is at most 8 lines."""
+        if self.start > self.end:
+            raise ValueError(
+                f"Focus start line {self.start} must be less than or equal to end line {self.end}."
+            )
+        span = self.end - self.start + 1
+        if span > 8:
+            raise ValueError(
+                f"Focus range {self.start}-{self.end} spans {span} lines, the limit is 8."
+            )
+        return self
+
+
+class NodeSpec(BaseRepoModel):
+    """A node in an architecture diagram.
+
+    Attributes:
+        id: Short lowercase identifier (letters and digits).
+        label: Short component label (1 to 3 words, at most 24 characters).
+        group: Node category ('input', 'core', 'output', 'storage', 'external').
+    """
+
+    id: str = Field(..., description="Short lowercase identifier (letters and digits).")
+    label: str = Field(..., description="Node label (1 to 3 words, at most 24 characters).")
+    group: str = Field(default="core", description="Node group category.")
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        """Validate node id consists of lowercase letters and digits."""
+        clean = v.strip().lower()
+        if not clean or not re.match(r"^[a-z0-9]+$", clean):
+            raise ValueError(f"Node id '{v}' must consist of lowercase letters and digits.")
+        return clean
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v: str) -> str:
+        """Validate node label length and word count."""
+        words = word_count(v)
+        if words < 1:
+            raise ValueError("Node label cannot be empty.")
+        if words > 3:
+            raise ValueError(f"Node label '{v}' has {words} words, the limit is 3.")
+        if len(v) > 24:
+            raise ValueError(f"Node label '{v}' has {len(v)} characters, the limit is 24.")
+        return v
+
+    @field_validator("group")
+    @classmethod
+    def validate_group(cls, v: str) -> str:
+        """Validate node group category."""
+        clean = v.strip().lower()
+        if clean not in VALID_NODE_GROUPS:
+            raise ValueError(
+                f"Node group '{v}' is invalid, must be one of: {', '.join(VALID_NODE_GROUPS)}."
+            )
+        return clean
+
+
+class EdgeSpec(BaseRepoModel):
+    """A directed edge between two architecture nodes.
+
+    Attributes:
+        source: Origin node id.
+        target: Destination node id.
+        label: Optional edge label (at most 3 words, may be empty).
+    """
+
+    source: str = Field(..., description="Source node id.")
+    target: str = Field(..., description="Target node id.")
+    label: str = Field(default="", description="Edge label (at most 3 words).")
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v: str) -> str:
+        """Validate edge label word count."""
+        words = word_count(v)
+        if words > 3:
+            raise ValueError(f"Edge label '{v}' has {words} words, the limit is 3.")
+        return v
+
+
+class ArchitectureSpec(BaseRepoModel):
+    """Architecture diagram specification with nodes and directed edges.
+
+    Attributes:
+        nodes: List of 3 to 8 NodeSpec instances.
+        edges: List of at most 12 EdgeSpec instances.
+    """
+
+    nodes: list[NodeSpec] = Field(..., description="Nodes in the diagram (3 to 8).")
+    edges: list[EdgeSpec] = Field(default_factory=list, description="Directed edges (at most 12).")
+
+    @field_validator("nodes")
+    @classmethod
+    def validate_nodes_count(cls, v: list[NodeSpec]) -> list[NodeSpec]:
+        """Validate node count and uniqueness of ids."""
+        if len(v) < 3 or len(v) > 8:
+            raise ValueError(f"ArchitectureSpec must have between 3 and 8 nodes, got {len(v)}.")
+        ids = [n.id for n in v]
+        if len(ids) != len(set(ids)):
+            raise ValueError("ArchitectureSpec nodes must have unique ids.")
+        return v
+
+    @field_validator("edges")
+    @classmethod
+    def validate_edges_count(cls, v: list[EdgeSpec]) -> list[EdgeSpec]:
+        """Validate edge count."""
+        if len(v) > 12:
+            raise ValueError(f"ArchitectureSpec edges cannot exceed 12, got {len(v)}.")
+        return v
+
+    @model_validator(mode="after")
+    def validate_connections(self) -> Self:
+        """Validate that all edge endpoints exist and nodes are connected."""
+        node_ids = {n.id for n in self.nodes}
+        for edge in self.edges:
+            if edge.source not in node_ids:
+                raise ValueError(f"Edge source '{edge.source}' does not exist in nodes.")
+            if edge.target not in node_ids:
+                raise ValueError(f"Edge target '{edge.target}' does not exist in nodes.")
+
+        if len(self.edges) >= 2:
+            connected = {edge.source for edge in self.edges} | {edge.target for edge in self.edges}
+            isolated = node_ids - connected
+            if isolated:
+                raise ValueError(
+                    f"Every node must have at least one edge unless there are fewer than 2 edges in total; "
+                    f"isolated nodes: {', '.join(sorted(isolated))}."
+                )
+        return self
 
 
 class Scene(BaseRepoModel):
@@ -382,11 +506,17 @@ class Scene(BaseRepoModel):
 
     Attributes:
         id: Scene identifier (at least 1).
-        type: Scene type ('title', 'problem', 'feature', 'howto', 'outro').
+        type: Scene type ('title', 'problem', 'feature', 'howto', 'outro', 'media', 'code', 'terminal', 'architecture', 'stats').
         heading: Heading text (1 to 6 words, at most 60 characters).
         bullets: List of bullet points (at most 4 items, each at most 8 words).
         narration: Narration script (15 to 40 words).
         code: Optional code snippet (default empty, at most 6 lines).
+        media_id: Optional media identifier for media scenes.
+        file_id: Optional key file identifier for code scenes.
+        focus: Optional list of line ranges to highlight in a code scene (at most 4).
+        terminal_id: Optional terminal session identifier for terminal scenes.
+        architecture: Optional architecture diagram spec for architecture scenes.
+        stat_keys: Optional repository stat keys to display (at most 4).
     """
 
     id: int = Field(..., description="Scene ID, starting at 1.")
@@ -395,35 +525,28 @@ class Scene(BaseRepoModel):
     bullets: list[str] = Field(default_factory=list, description="Scene bullet points.")
     narration: str = Field(..., description="Scene narration text.")
     code: str = Field(default="", description="Code snippet displayed on the slide.")
+    media_id: str | None = Field(default=None, description="Referenced media ID.")
+    file_id: str | None = Field(default=None, description="Referenced key file ID.")
+    focus: list[FocusRange] = Field(default_factory=list, description="Highlighted line ranges.")
+    terminal_id: str | None = Field(default=None, description="Referenced terminal session ID.")
+    architecture: ArchitectureSpec | None = Field(
+        default=None, description="Architecture diagram spec."
+    )
+    stat_keys: list[str] = Field(
+        default_factory=list, description="Repository stat keys to display."
+    )
 
     @field_validator("id")
     @classmethod
     def validate_id(cls, v: int) -> int:
-        """Validate that scene id is at least 1.
-
-        Args:
-            v: Scene ID.
-
-        Returns:
-            Validated ID.
-
-        Raises:
-            ValueError: If ID is less than 1.
-        """
+        """Validate that scene id is at least 1."""
         if v < 1:
             raise ValueError(f"Scene id must be at least 1, got {v}.")
         return v
 
     @model_validator(mode="after")
     def validate_scene(self) -> Self:
-        """Validate all constraints for this scene.
-
-        Returns:
-            Self if validation succeeds.
-
-        Raises:
-            ValueError: If any scene limit is exceeded or constraint is violated.
-        """
+        """Validate all constraints for this scene."""
         sid = self.id
 
         if self.type not in VALID_SCENE_TYPES:
@@ -459,6 +582,31 @@ class Scene(BaseRepoModel):
         if len(code_lines) > 6:
             raise ValueError(f"Scene {sid}: code has {len(code_lines)} lines, the limit is 6.")
 
+        if len(self.focus) > 4:
+            raise ValueError(f"Scene {sid}: focus has {len(self.focus)} items, the limit is 4.")
+
+        for key in self.stat_keys:
+            if key not in VALID_STAT_KEYS:
+                raise ValueError(
+                    f"Scene {sid}: invalid stat_key '{key}', must be one of: {', '.join(VALID_STAT_KEYS)}."
+                )
+        if len(self.stat_keys) > 4:
+            raise ValueError(
+                f"Scene {sid}: stat_keys has {len(self.stat_keys)} items, the limit is 4."
+            )
+
+        # Type-specific requirements
+        if self.type == "media" and not self.media_id:
+            raise ValueError(f"Scene {sid}: type media needs a media_id.")
+        if self.type == "code" and not self.file_id:
+            raise ValueError(f"Scene {sid}: type code needs a file_id.")
+        if self.type == "terminal" and not self.terminal_id:
+            raise ValueError(f"Scene {sid}: type terminal needs a terminal_id.")
+        if self.type == "architecture" and not self.architecture:
+            raise ValueError(f"Scene {sid}: type architecture needs architecture.")
+        if self.type == "stats" and (len(self.stat_keys) < 2 or len(self.stat_keys) > 4):
+            raise ValueError(f"Scene {sid}: type stats needs 2 to 4 stat_keys.")
+
         return self
 
 
@@ -467,7 +615,7 @@ class ScriptData(BaseRepoModel):
 
     Attributes:
         title: Script title (non-empty, at most 80 characters).
-        scenes: Ordered list of scenes (5 to 8 items).
+        scenes: Ordered list of scenes (5 to 8 for plain, 6 to 9 if visual scenes used).
     """
 
     title: str = Field(..., description="Script title.")
@@ -476,17 +624,7 @@ class ScriptData(BaseRepoModel):
     @field_validator("title")
     @classmethod
     def validate_title(cls, v: str) -> str:
-        """Validate that the title is non-empty and at most 80 characters.
-
-        Args:
-            v: Title string.
-
-        Returns:
-            Validated title.
-
-        Raises:
-            ValueError: If title is empty or exceeds 80 characters.
-        """
+        """Validate that the title is non-empty and at most 80 characters."""
         if not v:
             raise ValueError("Script title cannot be empty.")
         if len(v) > 80:
@@ -496,34 +634,44 @@ class ScriptData(BaseRepoModel):
     @field_validator("scenes")
     @classmethod
     def validate_scenes_count(cls, v: list[Scene]) -> list[Scene]:
-        """Validate that the scenes list has between 5 and 8 scenes.
-
-        Args:
-            v: List of Scene instances.
-
-        Returns:
-            Validated scenes list.
-
-        Raises:
-            ValueError: If scenes list count is outside [5, 8].
-        """
-        if len(v) < 5 or len(v) > 8:
-            raise ValueError(f"Script must have between 5 and 8 scenes, got {len(v)}.")
+        """Validate scene counts based on whether visual scene types are used."""
+        has_v2 = any(s.type in V2_SCENE_TYPES for s in v)
+        if has_v2:
+            if len(v) < 6 or len(v) > 9:
+                raise ValueError(
+                    f"Script with visual scenes must have between 6 and 9 scenes, got {len(v)}."
+                )
+        else:
+            if len(v) < 5 or len(v) > 8:
+                raise ValueError(f"Script must have between 5 and 8 scenes, got {len(v)}.")
         return v
 
     @model_validator(mode="after")
     def validate_script_constraints(self) -> Self:
-        """Validate script-level constraints across scenes.
-
-        Returns:
-            Self if validation succeeds.
-
-        Raises:
-            ValueError: If first scene is not title, last is not outro,
-                ids are not 1..N in order, or total narration exceeds 220 words.
-        """
+        """Validate script-level constraints across scenes."""
         if not self.scenes:
             return self
+
+        # Limits per visual scene type
+        media_count = sum(1 for s in self.scenes if s.type == "media")
+        if media_count > 2:
+            raise ValueError(f"Script can have at most 2 media scenes, got {media_count}.")
+
+        code_count = sum(1 for s in self.scenes if s.type == "code")
+        if code_count > 2:
+            raise ValueError(f"Script can have at most 2 code scenes, got {code_count}.")
+
+        terminal_count = sum(1 for s in self.scenes if s.type == "terminal")
+        if terminal_count > 1:
+            raise ValueError(f"Script can have at most 1 terminal scene, got {terminal_count}.")
+
+        arch_count = sum(1 for s in self.scenes if s.type == "architecture")
+        if arch_count > 1:
+            raise ValueError(f"Script can have at most 1 architecture scene, got {arch_count}.")
+
+        stats_count = sum(1 for s in self.scenes if s.type == "stats")
+        if stats_count > 1:
+            raise ValueError(f"Script can have at most 1 stats scene, got {stats_count}.")
 
         # 1. First scene has type title
         first_scene = self.scenes[0]
@@ -547,9 +695,9 @@ class ScriptData(BaseRepoModel):
                 f"Scene ids must be exactly 1 to {len(self.scenes)} in order, got {actual_ids}."
             )
 
-        # 4. Total narration is at most 220 words
+        # 4. Total narration is at most 240 words
         total_words = sum(word_count(s.narration) for s in self.scenes)
-        if total_words > 220:
-            raise ValueError(f"Total narration has {total_words} words, the limit is 220.")
+        if total_words > 240:
+            raise ValueError(f"Total narration has {total_words} words, the limit is 240.")
 
         return self

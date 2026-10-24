@@ -644,7 +644,9 @@ class OpenAICompatibleClient:
         )
 
         # Fallback if server rejects response_format
-        if resp.status_code == 400 and "response_format" in resp.text.lower():
+        if resp.status_code == 400 and (
+            "response_format" in resp.text.lower() or "json_validate_failed" in resp.text.lower()
+        ):
             logger.info("Server does not support response_format; retrying without it.")
             payload_no_rf = dict(payload)
             payload_no_rf.pop("response_format", None)
