@@ -8,13 +8,14 @@ import sys
 import time
 import urllib.parse
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import requests
 
 from repo2video.config import get_settings
 from repo2video.errors import AnalyzerError, Repo2VideoError
-from repo2video.models import RepoData
+from repo2video.models import KeyFile, MediaRef, RepoData, TerminalSession
 
 if TYPE_CHECKING:
     from repo2video.config import Settings
@@ -66,6 +67,115 @@ BADGE_KEYWORDS = (
     "codecov",
     "coveralls",
 )
+
+SKIP_MEDIA_HOSTS = frozenset(
+    {
+        "shields.io",
+        "img.shields.io",
+        "badge.fury.io",
+        "badgen.net",
+        "travis-ci.org",
+        "travis-ci.com",
+        "codecov.io",
+        "coveralls.io",
+        "api.codacy.com",
+        "snyk.io",
+        "opencollective.com",
+        "contrib.rocks",
+        "avatars.githubusercontent.com",
+        "github.githubassets.com",
+    }
+)
+
+COMMAND_LANGS = frozenset(
+    {"bash", "sh", "shell", "zsh", "console", "terminal", "powershell", "cmd"}
+)
+
+INSTALL_PATTERNS = (
+    "pip install",
+    "pipx install",
+    "npm install",
+    "npm i",
+    "yarn add",
+    "pnpm add",
+    "cargo install",
+    "go install",
+    "brew install",
+    "git clone",
+    "docker pull",
+    "docker run",
+    "apt install",
+)
+
+HIGH_VALUE_STEMS = frozenset(
+    {"main", "app", "index", "cli", "server", "__main__", "run", "manage", "program", "lib"}
+)
+
+PREFERRED_PARENTS = frozenset({"src", "app", "lib", "cmd", "pkg"})
+
+PENALTY_STEM_KEYWORDS = ("test", "spec", "config", "setup", "utils", "helpers")
+
+ALLOWED_KEY_FILE_EXTENSIONS = frozenset(
+    {
+        "py",
+        "js",
+        "jsx",
+        "ts",
+        "tsx",
+        "go",
+        "rs",
+        "java",
+        "kt",
+        "rb",
+        "php",
+        "c",
+        "cpp",
+        "h",
+        "cs",
+        "swift",
+        "dart",
+        "sh",
+    }
+)
+
+SKIP_PATH_SEGMENTS = frozenset(
+    {
+        "node_modules",
+        "vendor",
+        "dist",
+        "build",
+        "test",
+        "tests",
+        "__tests__",
+        "spec",
+        "docs",
+        "examples",
+        "migrations",
+        "generated",
+        "fixtures",
+    }
+)
+
+EXTENSION_TO_LANGUAGE: dict[str, str] = {
+    "py": "python",
+    "js": "javascript",
+    "jsx": "javascript",
+    "ts": "typescript",
+    "tsx": "typescript",
+    "go": "go",
+    "rs": "rust",
+    "java": "java",
+    "kt": "kotlin",
+    "rb": "ruby",
+    "php": "php",
+    "c": "c",
+    "cpp": "cpp",
+    "h": "c",
+    "cs": "csharp",
+    "swift": "swift",
+    "dart": "dart",
+    "sh": "shell",
+}
 
 
 def _is_valid_github_name(name: str) -> bool:
@@ -422,6 +532,461 @@ def clean_readme(text: str, limit: int = 6000) -> str:
     return text
 
 
+def resolve_relative_url(url: str, owner: str, repo: str, default_branch: str) -> str:
+    """Resolve a relative URL against raw.githubusercontent.com for the repository.
+
+    Args:
+        url: Raw URL from the README (may be relative or absolute).
+        owner: Repository owner.
+        repo: Repository name.
+        default_branch: Default git branch.
+
+    Returns:
+        Absolute resolved URL string.
+    """
+    clean_url = url.strip()
+    if clean_url.startswith(("http://", "https://", "data:")):
+        return clean_url
+
+    path = clean_url.removeprefix("./").removeprefix("/").lstrip("/")
+
+    # URL-encode spaces while preserving other valid URL characters
+    encoded_path = path.replace(" ", "%20")
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/{default_branch}/{encoded_path}"
+
+
+def extract_media_refs(
+    raw_readme: str,
+    owner: str,
+    repo: str,
+    default_branch: str,
+) -> list[MediaRef]:
+    """Extract media references (images, gifs, videos) from raw README text in document order.
+
+    Resolves relative URLs, skips badges, SVGs, data URIs, and known badge hosts,
+    deduplicates by URL, and assigns identifiers m1, m2, up to 12 items.
+
+    Args:
+        raw_readme: Uncleaned, raw README markdown content.
+        owner: Repository owner.
+        repo: Repository name.
+        default_branch: Default git branch.
+
+    Returns:
+        List of at most 12 MediaRef objects.
+    """
+    if not raw_readme:
+        return []
+
+    # Candidates: tuple of (start_position, raw_url, alt, forced_kind)
+    candidates: list[tuple[int, str, str, str | None]] = []
+
+    # 1. Markdown images: ![alt](url)
+    md_img_pattern = re.compile(
+        r"!\[(?P<alt>[^\]]*)\]\(\s*<?(?P<url>[^\s\)>\"']+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)"
+    )
+    for m in md_img_pattern.finditer(raw_readme):
+        candidates.append((m.start(), m.group("url"), m.group("alt"), None))
+
+    # 2. HTML <img> tags: <img src="..." alt="...">
+    html_img_pattern = re.compile(r"<img\b(?P<attrs>[^>]*)>", re.IGNORECASE)
+    src_attr_pattern = re.compile(r"""\bsrc\s*=\s*["']?([^"'\s>]+)""", re.IGNORECASE)
+    alt_attr_pattern = re.compile(r"""\balt\s*=\s*["']?([^"'>]*)""", re.IGNORECASE)
+
+    for m in html_img_pattern.finditer(raw_readme):
+        attrs = m.group("attrs")
+        src_m = src_attr_pattern.search(attrs)
+        if src_m:
+            raw_url = src_m.group(1)
+            alt_m = alt_attr_pattern.search(attrs)
+            alt_text = alt_m.group(1) if alt_m else ""
+            candidates.append((m.start(), raw_url, alt_text, None))
+
+    # 3. HTML <video> and <source> tags: <video src="..."> or <source src="...">
+    html_video_pattern = re.compile(r"<(?:video|source)\b(?P<attrs>[^>]*)>", re.IGNORECASE)
+    for m in html_video_pattern.finditer(raw_readme):
+        attrs = m.group("attrs")
+        src_m = src_attr_pattern.search(attrs)
+        if src_m:
+            candidates.append((m.start(), src_m.group(1), "", "video"))
+
+    # 4. Lines that contain only a github.com/user-attachments/assets/ link
+    attachment_line_pattern = re.compile(
+        r"^\s*(?P<url>https?://(?:www\.)?github\.com/user-attachments/assets/[a-zA-Z0-9_.-]+)\s*$",
+        re.MULTILINE,
+    )
+    for m in attachment_line_pattern.finditer(raw_readme):
+        candidates.append((m.start(), m.group("url"), "", "video"))
+
+    # 5. Links ending in .mp4, .webm, or .mov: [alt](url.mp4)
+    video_link_pattern = re.compile(
+        r"\[(?P<alt>[^\]]*)\]\(\s*<?(?P<url>[^\s\)>\"']+\.(?:mp4|webm|mov)(?:\?[^\s\)>\"']*)?)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)",
+        re.IGNORECASE,
+    )
+    for m in video_link_pattern.finditer(raw_readme):
+        candidates.append((m.start(), m.group("url"), m.group("alt"), "video"))
+
+    # Sort candidates strictly in README document order
+    candidates.sort(key=lambda c: c[0])
+
+    media_refs: list[MediaRef] = []
+    seen_urls: set[str] = set()
+
+    for _, raw_url, alt, forced_kind in candidates:
+        url_clean = raw_url.strip().strip("<>\"'")
+        if not url_clean:
+            continue
+
+        resolved = resolve_relative_url(url_clean, owner, repo, default_branch)
+
+        # Skip data: URIs
+        if resolved.lower().startswith("data:"):
+            continue
+
+        try:
+            parsed = urllib.parse.urlsplit(resolved)
+        except (ValueError, AttributeError):
+            continue
+
+        host = (parsed.hostname or "").lower()
+
+        # Skip host check
+        if host in SKIP_MEDIA_HOSTS or any(host.endswith("." + sh) for sh in SKIP_MEDIA_HOSTS):
+            continue
+
+        # Skip .svg files
+        path_lower = parsed.path.lower()
+        if path_lower.endswith(".svg") or ".svg" in resolved.lower():
+            continue
+
+        # Skip actions workflows badges
+        if "/actions/workflows/" in resolved and "badge.svg" in resolved:
+            continue
+
+        # Skip emoji images
+        res_lower = resolved.lower()
+        if (
+            "images/icons/emoji" in res_lower
+            or "/emojis/" in res_lower
+            or "githubassets.com/images/icons" in res_lower
+        ):
+            continue
+
+        # Determine media kind
+        if forced_kind == "video" or "user-attachments/assets" in resolved:
+            kind = "video"
+        elif path_lower.endswith(".gif") or ".gif?" in res_lower:
+            kind = "gif"
+        elif path_lower.endswith((".mp4", ".webm", ".mov")):
+            kind = "video"
+        else:
+            kind = "image"
+
+        # Deduplicate
+        if resolved in seen_urls:
+            continue
+        seen_urls.add(resolved)
+
+        media_refs.append(
+            MediaRef(
+                id=f"m{len(media_refs) + 1}",
+                url=resolved,
+                alt=alt.strip(),
+                kind=kind,
+            )
+        )
+
+        if len(media_refs) >= 12:
+            break
+
+    return media_refs
+
+
+def extract_terminal_sessions(raw_readme: str) -> list[TerminalSession]:
+    """Extract terminal command and output sessions from raw README text.
+
+    Identifies command blocks by language tag or prompt characters, parses
+    following output blocks, classifies purpose as install or usage, and returns
+    at most 4 sessions (first install, then usage).
+
+    Args:
+        raw_readme: Raw markdown content of repository README.
+
+    Returns:
+        List of at most 4 TerminalSession instances.
+    """
+    if not raw_readme:
+        return []
+
+    fence_pattern = re.compile(
+        r"```(?P<lang>[a-zA-Z0-9_-]*)[ \t]*\r?\n(?P<code>.*?)```",
+        re.DOTALL,
+    )
+
+    blocks: list[dict[str, Any]] = []
+    for m in fence_pattern.finditer(raw_readme):
+        blocks.append(
+            {
+                "start": m.start(),
+                "end": m.end(),
+                "lang": m.group("lang").strip().lower(),
+                "code": m.group("code"),
+            }
+        )
+
+    parsed_sessions: list[dict[str, Any]] = []
+    i = 0
+    while i < len(blocks):
+        b = blocks[i]
+        lang = b["lang"]
+        code = b["code"]
+
+        # Check if block qualifies as command block
+        is_cmd = False
+        if lang in COMMAND_LANGS:
+            is_cmd = True
+        elif not lang:
+            non_empty = [line.strip() for line in code.splitlines() if line.strip()]
+            if non_empty:
+                prompt_count = sum(
+                    1 for line in non_empty if line.startswith(("$ ", "> ", "$", ">"))
+                )
+                if prompt_count >= len(non_empty) / 2:
+                    is_cmd = True
+
+        if not is_cmd:
+            i += 1
+            continue
+
+        # Clean command lines
+        cleaned_cmds: list[str] = []
+        skip_block = False
+        for line in code.splitlines():
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+
+            cmd_line = line
+            if cmd_line.startswith(("$ ", "> ")):
+                cmd_line = cmd_line[2:]
+            elif cmd_line.startswith(("$", ">")):
+                cmd_line = cmd_line[1:].lstrip()
+
+            cmd_line = cmd_line.strip()
+            if not cmd_line or cmd_line.startswith("#"):
+                continue
+
+            if len(cmd_line) > 100:
+                skip_block = True
+                break
+
+            cleaned_cmds.append(cmd_line)
+
+        # Skip block if more than 8 command lines, line > 100 chars, or empty
+        if skip_block or len(cleaned_cmds) > 8 or len(cleaned_cmds) == 0:
+            i += 1
+            continue
+
+        # Keep 1 to 4 commands
+        commands = cleaned_cmds[:4]
+
+        # Classify purpose
+        is_install = any(
+            any(pat in cmd.lower() for pat in INSTALL_PATTERNS) for cmd in cleaned_cmds
+        )
+        purpose = "install" if is_install else "usage"
+
+        # Look ahead for paired output block
+        output_lines: list[str] = []
+        if i + 1 < len(blocks):
+            next_b = blocks[i + 1]
+            between_text = raw_readme[b["end"] : next_b["start"]]
+            non_empty_between = [line for line in between_text.splitlines() if line.strip()]
+
+            if len(non_empty_between) <= 3:
+                next_lang = next_b["lang"]
+                if next_lang in ("text", "console", "none", ""):
+                    next_code_lines = [line for line in next_b["code"].splitlines() if line.strip()]
+                    # Check if next block lines do not look like commands
+                    looks_like_cmds = any(
+                        line.startswith(("$ ", "> "))
+                        or any(pat in line.lower() for pat in INSTALL_PATTERNS)
+                        for line in next_code_lines
+                    )
+                    if not looks_like_cmds:
+                        output_lines = [line[:100] for line in next_code_lines[:8]]
+                        # Consume the output block
+                        i += 1
+
+        parsed_sessions.append(
+            {
+                "purpose": purpose,
+                "commands": commands,
+                "output": output_lines,
+            }
+        )
+        i += 1
+
+    # Keep at most 4 sessions: the first install session, then usage sessions
+    install_sessions = [s for s in parsed_sessions if s["purpose"] == "install"]
+    usage_sessions = [s for s in parsed_sessions if s["purpose"] == "usage"]
+
+    selected: list[dict[str, Any]] = []
+    if install_sessions:
+        selected.append(install_sessions[0])
+        selected.extend(usage_sessions[:3])
+    else:
+        selected.extend(usage_sessions[:4])
+
+    return [
+        TerminalSession(
+            id=f"t{idx}",
+            purpose=s["purpose"],
+            commands=s["commands"],
+            output=s["output"],
+        )
+        for idx, s in enumerate(selected, start=1)
+    ]
+
+
+def score_key_file(
+    path: str,
+    repo_name: str,
+    top_language: str = "",
+) -> int:
+    """Score a candidate repository source file for relevance as a key code file.
+
+    Args:
+        path: Relative file path in the repository.
+        repo_name: Repository name.
+        top_language: Primary programming language of the repository.
+
+    Returns:
+        Integer score representing relevance.
+    """
+    stem = Path(path).stem.lower()
+    parts = path.split("/")
+    parent_folder = parts[-2].lower() if len(parts) > 1 else ""
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+
+    score = 0
+    if stem in HIGH_VALUE_STEMS:
+        score += 40
+
+    if parent_folder in PREFERRED_PARENTS or parent_folder == repo_name.lower():
+        score += 15
+
+    if stem == repo_name.lower():
+        score += 10
+
+    # +10 when extension matches repository's top language
+    lang_for_ext = EXTENSION_TO_LANGUAGE.get(ext, "")
+    if top_language and (
+        lang_for_ext == top_language.lower()
+        or ext == top_language.lower()
+        or top_language.lower() in (lang_for_ext, ext)
+    ):
+        score += 10
+
+    # -5 for each folder level beyond the first
+    folder_levels = len(parts) - 1
+    if folder_levels > 1:
+        score -= (folder_levels - 1) * 5
+
+    # -30 when stem contains test, spec, config, setup, utils or helpers
+    if any(kw in stem for kw in PENALTY_STEM_KEYWORDS):
+        score -= 30
+
+    return score
+
+
+def prepare_file_content(raw_text: str) -> tuple[str, int]:
+    """Prepare and clean file content excerpt for KeyFile.
+
+    Converts tabs to 4 spaces, drops leading license comment header (>3 lines),
+    caps at 40 lines, 110 chars per line, and 2500 chars at line boundary.
+
+    Args:
+        raw_text: Raw file content fetched from GitHub.
+
+    Returns:
+        Tuple of (cleaned_content, total_lines).
+    """
+    total_lines = len(raw_text.splitlines())
+    text = raw_text.replace("\t", "    ")
+    lines = text.splitlines()
+
+    # Strip leading blank lines
+    while lines and not lines[0].strip():
+        lines.pop(0)
+
+    # Check for leading comment block > 3 lines
+    comment_lines_count = 0
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith(("#", "//", "/*", "*", "*/", '"""', "'''")):
+            comment_lines_count += 1
+        else:
+            break
+
+    if comment_lines_count > 3:
+        idx = 0
+        while idx < len(lines):
+            s = lines[idx].strip()
+            if not s or s.startswith(("#", "//", "/*", "*", "*/", '"""', "'''")):
+                idx += 1
+            else:
+                break
+        lines = lines[idx:]
+        while lines and not lines[0].strip():
+            lines.pop(0)
+
+    # Keep first 40 lines
+    lines = lines[:40]
+
+    # Cut each line to 110 characters
+    lines = [line[:110] for line in lines]
+
+    # Cut to 2500 characters at a line boundary
+    kept_lines: list[str] = []
+    current_chars = 0
+    for line in lines:
+        added = len(line) + (1 if kept_lines else 0)
+        if current_chars + added > 2500:
+            break
+        kept_lines.append(line)
+        current_chars += added
+
+    return "\n".join(kept_lines), total_lines
+
+
+def _calculate_language_percentages(raw_languages: dict[str, Any]) -> dict[str, float]:
+    """Calculate byte percentages for the top 5 languages.
+
+    Args:
+        raw_languages: Mapping of language name to byte count.
+
+    Returns:
+        Dictionary mapping language name to percentage float.
+    """
+    valid_items = [
+        (lang, count)
+        for lang, count in raw_languages.items()
+        if isinstance(count, (int, float)) and count > 0
+    ]
+    if not valid_items:
+        return {}
+
+    total_bytes = sum(count for _, count in valid_items)
+    if total_bytes <= 0:
+        return {}
+
+    sorted_langs = sorted(valid_items, key=lambda x: x[1], reverse=True)[:5]
+    return {lang: round((count / total_bytes) * 100.0, 1) for lang, count in sorted_langs}
+
+
 def _process_languages(data: dict[str, int]) -> list[str]:
     """Process languages dictionary from GitHub REST API.
 
@@ -449,41 +1014,39 @@ def _process_languages(data: dict[str, int]) -> list[str]:
     if not filtered and sorted_langs:
         filtered = [sorted_langs[0][0]]
 
-    return filtered[:5]
+    return [name for name in filtered[:5]]
 
 
 def _process_tree(tree_items: list[dict[str, Any]]) -> list[str]:
-    """Process top-level git tree entries.
+    """Filter and sort top-level directory items from GitHub Git Trees API.
 
-    Separates directories and files, skips noise items, sorts directories
-    alphabetically ignoring case, sorts files alphabetically ignoring case,
-    and returns directories first followed by files, up to 30 entries.
+    Excludes hidden files, version control metadata, cache directories, and lockfiles.
+    Sorts directories first, then files alphabetically, and caps at 30 items.
 
     Args:
-        tree_items: List of git tree entries from GitHub REST API.
+        tree_items: List of item dictionaries from the tree response.
 
     Returns:
-        List of at most 30 top-level entry names.
+        Filtered list of at most 30 top-level file and directory names.
     """
-    dirs: list[str] = []
-    files: list[str] = []
+    candidates: list[tuple[bool, str]] = []
 
     for item in tree_items:
-        path = item.get("path", "")
-        item_type = item.get("type", "")
-
-        if not path or path.lower() in NOISE_ITEMS:
+        path = str(item.get("path", ""))
+        # Only consider top-level entries (no forward slash in path)
+        if "/" in path or not path:
             continue
 
-        if item_type == "tree":
-            dirs.append(f"{path}/")
-        else:
-            files.append(path)
+        path_lower = path.lower()
+        if path_lower in NOISE_ITEMS or path.startswith("."):
+            continue
 
-    dirs.sort(key=lambda s: s.lower())
-    files.sort(key=lambda s: s.lower())
+        is_tree = item.get("type") == "tree"
+        candidates.append((is_tree, path))
 
-    return (dirs + files)[:30]
+    # Sort directories first (is_tree=True), then alphabetically case-insensitive
+    candidates.sort(key=lambda x: (not x[0], x[1].lower()))
+    return [name for _, name in candidates[:30]]
 
 
 def _request_with_retry(
@@ -491,65 +1054,59 @@ def _request_with_retry(
     method: str,
     url: str,
     headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    max_retries: int = 2,
+    base_backoff: float = 1.0,
 ) -> requests.Response:
-    """Execute an HTTP request with retry logic for transient errors.
+    """Execute an HTTP request with exponential backoff on transient errors.
 
-    Retries only connection errors, timeouts, and HTTP 500, 502, 503, 504 status codes
-    up to 2 times with delays of 1s and 2s. Never retries 4xx responses.
+    Retries on 502, 503, 504 and connection errors up to max_retries times.
 
     Args:
-        session: The requests.Session to use.
-        method: HTTP method (e.g. 'GET').
-        url: Request URL.
+        session: Active requests session.
+        method: HTTP method string (e.g. 'GET').
+        url: Target URL.
         headers: Optional request headers.
-        timeout: Request timeout in seconds (default 30).
+        max_retries: Maximum number of retry attempts.
+        base_backoff: Initial sleep duration in seconds before backoff.
 
     Returns:
-        The requests.Response object.
+        The successful or final HTTP Response.
 
     Raises:
-        AnalyzerError: On connection failure, rate limiting, or HTTP errors.
+        AnalyzerError: If all retry attempts fail due to network error.
     """
-    max_retries = 2
-    delays = [1, 2]
-
     for attempt in range(max_retries + 1):
-        if attempt > 0:
-            time.sleep(delays[attempt - 1])
-
         try:
-            resp = session.request(method, url, headers=headers, timeout=timeout)
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
-            if attempt < max_retries:
-                logger.warning(
-                    "Network error on %s %s (attempt %d/%d): %s. Retrying...",
-                    method,
-                    url,
-                    attempt + 1,
-                    max_retries + 1,
-                    exc.__class__.__name__,
-                )
-                continue
-            raise AnalyzerError(
-                "Could not reach GitHub.",
-                hint="Check your internet connection.",
-            ) from exc
+            resp = session.request(method, url, headers=headers, timeout=30.0)
         except requests.exceptions.RequestException as exc:
-            raise AnalyzerError(
-                "Could not reach GitHub.",
-                hint="Check your internet connection.",
-            ) from exc
-
-        if resp.status_code in (500, 502, 503, 504) and attempt < max_retries:
+            if attempt == max_retries:
+                raise AnalyzerError(
+                    f"Network error communicating with GitHub: {exc}",
+                    hint="Check your internet connection or GitHub status.",
+                ) from exc
+            sleep_time = base_backoff * (2**attempt)
             logger.warning(
-                "HTTP %d on %s %s (attempt %d/%d). Retrying...",
-                resp.status_code,
-                method,
+                "Request to %s failed (%s). Retrying in %.1fs (attempt %d/%d)...",
                 url,
+                exc,
+                sleep_time,
                 attempt + 1,
                 max_retries + 1,
             )
+            time.sleep(sleep_time)
+            continue
+
+        if resp.status_code in (502, 503, 504) and attempt < max_retries:
+            sleep_time = base_backoff * (2**attempt)
+            logger.warning(
+                "GitHub returned HTTP %d for %s. Retrying in %.1fs (attempt %d/%d)...",
+                resp.status_code,
+                url,
+                sleep_time,
+                attempt + 1,
+                max_retries + 1,
+            )
+            time.sleep(sleep_time)
             continue
 
         return resp
@@ -558,6 +1115,21 @@ def _request_with_retry(
         "Could not reach GitHub.",
         hint="Check your internet connection.",
     )
+
+
+def _check_rate_limit(resp: requests.Response, settings: Settings) -> None:
+    """Log a warning when GitHub API rate limit is low and no token is configured."""
+    if settings.github_token:
+        return
+    rem = resp.headers.get("X-RateLimit-Remaining")
+    if rem is not None and rem.isdigit():
+        val = int(rem)
+        if val < 10:
+            logger.warning(
+                "GitHub API rate limit remaining is low (%d remaining). "
+                "Consider setting GITHUB_TOKEN to raise the limit from 60 to 5000 requests per hour.",
+                val,
+            )
 
 
 def _handle_response_errors(resp: requests.Response, is_tree: bool = False) -> None:
@@ -639,8 +1211,9 @@ def analyze(
 ) -> RepoData:
     """Analyze a public GitHub repository and return structured RepoData.
 
-    Fetches repository metadata, README, language statistics, and top-level
-    directory structure using the GitHub REST API.
+    Fetches repository metadata, README, language statistics, directory structure,
+    media references, terminal sessions, and key source code files using the GitHub
+    REST API.
 
     Args:
         url: The GitHub repository URL to analyze.
@@ -669,10 +1242,11 @@ def analyze(
     request_count = 0
 
     try:
-        # a) GET /repos/{owner}/{repo}
+        # 1. GET /repos/{owner}/{repo}
         repo_url = f"https://api.github.com/repos/{owner}/{repo}"
         repo_resp = _request_with_retry(sess, "GET", repo_url)
         request_count += 1
+        _check_rate_limit(repo_resp, resolved_settings)
         _handle_response_errors(repo_resp)
 
         repo_info = repo_resp.json()
@@ -681,6 +1255,21 @@ def analyze(
         description: str = repo_info.get("description") or ""
         stars: int = repo_info.get("stargazers_count", 0)
         default_branch: str = repo_info.get("default_branch", "main")
+        homepage: str = str(repo_info.get("homepage") or "").strip()
+        raw_topics: list[Any] = repo_info.get("topics") or []
+        topics: list[str] = [str(t).strip() for t in raw_topics if str(t).strip()][:10]
+
+        license_str = ""
+        license_obj = repo_info.get("license")
+        if isinstance(license_obj, dict):
+            spdx_id = str(license_obj.get("spdx_id") or "").strip()
+            if spdx_id and spdx_id != "NOASSERTION":
+                license_str = spdx_id
+
+        forks: int = int(repo_info.get("forks_count", 0))
+        open_issues: int = int(repo_info.get("open_issues_count", 0))
+        created_at: str = str(repo_info.get("created_at") or "").strip()
+        pushed_at: str = str(repo_info.get("pushed_at") or "").strip()
 
         logger.info(
             "Repository metadata retrieved: %s/%s (stars: %d, default branch: %s)",
@@ -690,7 +1279,7 @@ def analyze(
             default_branch,
         )
 
-        # b) GET /repos/{owner}/{repo}/readme
+        # 2. GET /repos/{owner}/{repo}/readme
         readme_url = f"https://api.github.com/repos/{canonical_owner}/{canonical_name}/readme"
         readme_resp = _request_with_retry(
             sess,
@@ -699,6 +1288,7 @@ def analyze(
             headers={"Accept": "application/vnd.github.raw+json"},
         )
         request_count += 1
+        _check_rate_limit(readme_resp, resolved_settings)
 
         raw_readme = ""
         if readme_resp.status_code == 404:
@@ -707,29 +1297,40 @@ def analyze(
             _handle_response_errors(readme_resp)
             raw_readme = readme_resp.text
 
+        # Extract media and terminal sessions from RAW README
+        media = extract_media_refs(raw_readme, canonical_owner, canonical_name, default_branch)
+        terminals = extract_terminal_sessions(raw_readme)
+
         cleaned_readme = clean_readme(raw_readme, limit=6000)
         logger.info(
-            "README processed: %d characters before cleaning, %d characters after",
+            "README processed: %d characters before cleaning, %d characters after, "
+            "%d media references, %d terminal sessions",
             len(raw_readme),
             len(cleaned_readme),
+            len(media),
+            len(terminals),
         )
 
-        # c) GET /repos/{owner}/{repo}/languages
+        # 3. GET /repos/{owner}/{repo}/languages
         langs_url = f"https://api.github.com/repos/{canonical_owner}/{canonical_name}/languages"
         langs_resp = _request_with_retry(sess, "GET", langs_url)
         request_count += 1
+        _check_rate_limit(langs_resp, resolved_settings)
         _handle_response_errors(langs_resp)
 
-        languages = _process_languages(langs_resp.json())
+        raw_langs_data = langs_resp.json()
+        languages = _process_languages(raw_langs_data)
+        language_percentages = _calculate_language_percentages(raw_langs_data)
         logger.info("Languages analyzed: %d languages selected", len(languages))
 
-        # d) GET /repos/{owner}/{repo}/git/trees/{default_branch}
+        # 4. GET /repos/{owner}/{repo}/git/trees/{default_branch} (top-level)
         tree_url = (
             f"https://api.github.com/repos/{canonical_owner}/{canonical_name}/"
             f"git/trees/{default_branch}"
         )
         tree_resp = _request_with_retry(sess, "GET", tree_url)
         request_count += 1
+        _check_rate_limit(tree_resp, resolved_settings)
 
         top_level: list[str] = []
         if tree_resp.status_code == 409:
@@ -746,6 +1347,91 @@ def analyze(
             top_level = _process_tree(tree_data)
 
         logger.info("Top-level structure analyzed: %d entries retained", len(top_level))
+
+        # 5. GET /repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1 (key files)
+        key_files: list[KeyFile] = []
+        rec_tree_url = (
+            f"https://api.github.com/repos/{canonical_owner}/{canonical_name}/"
+            f"git/trees/{default_branch}?recursive=1"
+        )
+        try:
+            rec_tree_resp = _request_with_retry(sess, "GET", rec_tree_url)
+            request_count += 1
+            _check_rate_limit(rec_tree_resp, resolved_settings)
+            if rec_tree_resp.status_code == 200:
+                rec_tree_data = rec_tree_resp.json().get("tree", [])
+                candidates: list[tuple[int, str, str]] = []
+                top_lang = languages[0] if languages else ""
+                for item in rec_tree_data:
+                    if item.get("type") != "blob":
+                        continue
+                    f_path = str(item.get("path", ""))
+                    f_size = item.get("size")
+                    if isinstance(f_size, int) and f_size > 60000:
+                        continue
+                    f_ext = f_path.rsplit(".", 1)[-1].lower() if "." in f_path else ""
+                    if f_ext not in ALLOWED_KEY_FILE_EXTENSIONS:
+                        continue
+                    segments = [seg.lower() for seg in f_path.split("/")]
+                    if any(seg in SKIP_PATH_SEGMENTS for seg in segments):
+                        continue
+                    if ".min." in f_path.lower():
+                        continue
+                    score = score_key_file(f_path, canonical_name, top_lang)
+                    if score >= 20:
+                        candidates.append((score, f_path, f_ext))
+
+                # Sort candidates by score descending, then path ascending
+                candidates.sort(key=lambda x: (-x[0], x[1]))
+                top_3 = candidates[:3]
+
+                for idx, (_, k_path, k_ext) in enumerate(top_3, start=1):
+                    content_url = (
+                        f"https://api.github.com/repos/{canonical_owner}/{canonical_name}/"
+                        f"contents/{urllib.parse.quote(k_path)}?ref={default_branch}"
+                    )
+                    c_resp = _request_with_retry(
+                        sess,
+                        "GET",
+                        content_url,
+                        headers={"Accept": "application/vnd.github.raw+json"},
+                    )
+                    request_count += 1
+                    _check_rate_limit(c_resp, resolved_settings)
+                    if c_resp.status_code == 200:
+                        c_content, c_total_lines = prepare_file_content(c_resp.text)
+                        lang_name = EXTENSION_TO_LANGUAGE.get(k_ext, k_ext)
+                        key_files.append(
+                            KeyFile(
+                                id=f"f{idx}",
+                                path=k_path,
+                                language=lang_name,
+                                content=c_content,
+                                total_lines=c_total_lines,
+                            )
+                        )
+                    else:
+                        logger.warning(
+                            "Failed to fetch content for key file %s (HTTP %d)",
+                            k_path,
+                            c_resp.status_code,
+                        )
+            else:
+                logger.warning(
+                    "Recursive tree call returned HTTP %d for %s/%s. Skipping key files.",
+                    rec_tree_resp.status_code,
+                    canonical_owner,
+                    canonical_name,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to fetch recursive tree for key files in %s/%s: %s",
+                canonical_owner,
+                canonical_name,
+                exc,
+            )
+
+        logger.info("Key files identified: %d files retained", len(key_files))
 
         # Validation: either README or description must exist
         if not cleaned_readme and not description:
@@ -764,6 +1450,17 @@ def analyze(
             languages=languages,
             readme=cleaned_readme,
             top_level=top_level,
+            homepage=homepage,
+            topics=topics,
+            license=license_str,
+            forks=forks,
+            open_issues=open_issues,
+            created_at=created_at,
+            pushed_at=pushed_at,
+            language_percentages=language_percentages,
+            media=media,
+            key_files=key_files,
+            terminals=terminals,
         )
 
     finally:

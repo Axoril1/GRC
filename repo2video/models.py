@@ -121,6 +121,106 @@ class BaseRepoModel(BaseModel):
             ) from exc
 
 
+class MediaRef(BaseRepoModel):
+    """Reference to an image, gif, or video extracted from repository README.
+
+    Attributes:
+        id: Identifier in sequence (m1, m2, ...).
+        url: Direct media URL.
+        alt: Alternative description text (may be empty).
+        kind: Media type ('image', 'gif', or 'video').
+    """
+
+    id: str = Field(..., description="Media identifier (m1, m2, ...).")
+    url: str = Field(..., description="Direct media URL.")
+    alt: str = Field(default="", description="Alternative description text.")
+    kind: str = Field(default="image", description="Media kind: image, gif, or video.")
+
+    @field_validator("kind")
+    @classmethod
+    def validate_kind(cls, v: str) -> str:
+        """Validate that media kind is image, gif, or video."""
+        clean = v.strip().lower()
+        if clean not in ("image", "gif", "video"):
+            raise ValueError(f"Invalid media kind '{v}'. Must be image, gif, or video.")
+        return clean
+
+
+class KeyFile(BaseRepoModel):
+    """Key source code file excerpt extracted from the repository.
+
+    Attributes:
+        id: Identifier in sequence (f1, f2, f3).
+        path: Relative file path from repository root.
+        language: Lowercase programming language identifier.
+        content: Cleaned excerpt of the file (at most 40 lines and 2500 characters).
+        total_lines: Total line count of the full source file.
+    """
+
+    id: str = Field(..., description="File identifier (f1, f2, ...).")
+    path: str = Field(..., description="Relative file path.")
+    language: str = Field(..., description="Programming language name.")
+    content: str = Field(..., description="File content excerpt.")
+    total_lines: int = Field(default=0, ge=0, description="Total line count in the full file.")
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        """Validate content line count and character limits."""
+        lines = v.splitlines()
+        if len(lines) > 40:
+            raise ValueError(f"KeyFile content has {len(lines)} lines, the limit is 40.")
+        if len(v) > 2500:
+            raise ValueError(f"KeyFile content has {len(v)} characters, the limit is 2500.")
+        return v
+
+
+class TerminalSession(BaseRepoModel):
+    """Terminal command session extracted from repository README.
+
+    Attributes:
+        id: Identifier in sequence (t1, t2, ...).
+        purpose: Session purpose ('install' or 'usage').
+        commands: List of 1 to 4 command strings.
+        output: List of 0 to 8 output lines (each at most 100 characters).
+    """
+
+    id: str = Field(..., description="Session identifier (t1, t2, ...).")
+    purpose: str = Field(..., description="Session purpose ('install' or 'usage').")
+    commands: list[str] = Field(..., description="Command lines (1 to 4).")
+    output: list[str] = Field(default_factory=list, description="Output lines (0 to 8).")
+
+    @field_validator("purpose")
+    @classmethod
+    def validate_purpose(cls, v: str) -> str:
+        """Validate purpose is install or usage."""
+        clean = v.strip().lower()
+        if clean not in ("install", "usage"):
+            raise ValueError(f"Invalid terminal purpose '{v}'. Must be 'install' or 'usage'.")
+        return clean
+
+    @field_validator("commands")
+    @classmethod
+    def validate_commands(cls, v: list[str]) -> list[str]:
+        """Validate commands count is between 1 and 4."""
+        if not (1 <= len(v) <= 4):
+            raise ValueError(f"TerminalSession commands must have 1 to 4 items, got {len(v)}.")
+        return v
+
+    @field_validator("output")
+    @classmethod
+    def validate_output(cls, v: list[str]) -> list[str]:
+        """Validate output has at most 8 lines, each at most 100 characters."""
+        if len(v) > 8:
+            raise ValueError(f"TerminalSession output cannot exceed 8 lines, got {len(v)}.")
+        for idx, line in enumerate(v):
+            if len(line) > 100:
+                raise ValueError(
+                    f"TerminalSession output line {idx + 1} exceeds 100 characters ({len(line)})."
+                )
+        return v
+
+
 class RepoData(BaseRepoModel):
     """Metadata extracted from a public GitHub repository.
 
@@ -132,6 +232,17 @@ class RepoData(BaseRepoModel):
         languages: List of programming languages used.
         readme: Excerpt from repository README (at most 6000 characters).
         top_level: List of top-level file and directory names (at most 30 items).
+        homepage: Project homepage URL (default empty).
+        topics: List of topic tags (at most 10 items).
+        license: SPDX license identifier or empty string.
+        forks: Fork count (at least 0).
+        open_issues: Open issues count (at least 0).
+        created_at: ISO timestamp of repository creation.
+        pushed_at: ISO timestamp of last push.
+        language_percentages: Dict of top 5 languages to percentage float.
+        media: List of extracted MediaRef items (at most 12).
+        key_files: List of extracted KeyFile items (at most 3).
+        terminals: List of extracted TerminalSession items (at most 4).
     """
 
     name: str = Field(..., min_length=1, description="Repository name.")
@@ -143,6 +254,19 @@ class RepoData(BaseRepoModel):
     top_level: list[str] = Field(
         default_factory=list, max_length=30, description="Top-level entries."
     )
+    homepage: str = Field(default="", description="Project homepage URL.")
+    topics: list[str] = Field(default_factory=list, max_length=10, description="Repository topics.")
+    license: str = Field(default="", description="SPDX license ID or empty.")
+    forks: int = Field(default=0, ge=0, description="Forks count.")
+    open_issues: int = Field(default=0, ge=0, description="Open issues count.")
+    created_at: str = Field(default="", description="Repository creation timestamp.")
+    pushed_at: str = Field(default="", description="Repository last pushed timestamp.")
+    language_percentages: dict[str, float] = Field(
+        default_factory=dict, description="Top 5 languages byte percentage."
+    )
+    media: list[MediaRef] = Field(default_factory=list, description="Extracted README media.")
+    key_files: list[KeyFile] = Field(default_factory=list, description="Key source files.")
+    terminals: list[TerminalSession] = Field(default_factory=list, description="Terminal sessions.")
 
     @field_validator("name")
     @classmethod
@@ -232,6 +356,24 @@ class RepoData(BaseRepoModel):
         """
         if len(v) > 30:
             raise ValueError(f"Repository top_level has {len(v)} items, the limit is 30.")
+        return v
+
+    @field_validator("topics")
+    @classmethod
+    def validate_topics(cls, v: list[str]) -> list[str]:
+        """Validate topics item count.
+
+        Args:
+            v: List of topics.
+
+        Returns:
+            Validated list.
+
+        Raises:
+            ValueError: If topics has more than 10 items.
+        """
+        if len(v) > 10:
+            raise ValueError(f"Repository topics has {len(v)} items, the limit is 10.")
         return v
 
 
