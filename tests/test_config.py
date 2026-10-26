@@ -23,6 +23,8 @@ ENV_KEYS = [
     "VIDEO_FPS",
     "SCENE_PAUSE_SECONDS",
     "VOICE_SPEED",
+    "ANIM_FPS",
+    "ANIM_QUALITY",
 ]
 
 
@@ -53,6 +55,8 @@ def test_settings_defaults() -> None:
     assert settings.video_fps == 30
     assert settings.scene_pause_seconds == 0.6
     assert settings.voice_speed == 1.0
+    assert settings.anim_fps == 24
+    assert settings.anim_quality == "normal"
 
 
 def test_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,6 +76,8 @@ def test_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VIDEO_FPS", "60")
     monkeypatch.setenv("SCENE_PAUSE_SECONDS", "1.5")
     monkeypatch.setenv("VOICE_SPEED", "1.25")
+    monkeypatch.setenv("ANIM_FPS", "15")
+    monkeypatch.setenv("ANIM_QUALITY", "fast")
 
     get_settings.cache_clear()
     settings = get_settings()
@@ -91,6 +97,8 @@ def test_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.video_fps == 60
     assert settings.scene_pause_seconds == 1.5
     assert settings.voice_speed == 1.25
+    assert settings.anim_fps == 15
+    assert settings.anim_quality == "fast"
 
 
 def test_dotenv_loading_without_overwriting_real_variables(
@@ -226,3 +234,50 @@ def test_voice_speed_range_validation(monkeypatch: pytest.MonkeyPatch) -> None:
         Settings(voice_speed=0.2)
     with pytest.raises(ConfigError):
         Settings(voice_speed=2.0)
+
+
+def test_anim_fps_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify ANIM_FPS enforces integer between 10 and 30."""
+    # Too low
+    monkeypatch.setenv("ANIM_FPS", "9")
+    get_settings.cache_clear()
+    with pytest.raises(ConfigError) as exc_info:
+        get_settings()
+    assert "ANIM_FPS" in exc_info.value.message
+    assert "10 and 30" in exc_info.value.hint
+
+    # Too high
+    monkeypatch.setenv("ANIM_FPS", "31")
+    get_settings.cache_clear()
+    with pytest.raises(ConfigError) as exc_info:
+        get_settings()
+    assert "ANIM_FPS" in exc_info.value.message
+    assert "10 and 30" in exc_info.value.hint
+
+    # Non-integer
+    monkeypatch.setenv("ANIM_FPS", "twenty")
+    get_settings.cache_clear()
+    with pytest.raises(ConfigError) as exc_info:
+        get_settings()
+    assert "ANIM_FPS" in exc_info.value.message
+
+    # Direct instantiation
+    with pytest.raises(ConfigError):
+        Settings(anim_fps=5)
+    with pytest.raises(ConfigError):
+        Settings(anim_fps=35)
+
+
+def test_anim_quality_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify ANIM_QUALITY allows only 'normal' or 'fast'."""
+    monkeypatch.setenv("ANIM_QUALITY", "ultra")
+    get_settings.cache_clear()
+    with pytest.raises(ConfigError) as exc_info:
+        get_settings()
+    assert "ANIM_QUALITY" in exc_info.value.message
+    assert "normal" in exc_info.value.hint
+    assert "fast" in exc_info.value.hint
+
+    # Direct instantiation
+    with pytest.raises(ConfigError):
+        Settings(anim_quality="high")

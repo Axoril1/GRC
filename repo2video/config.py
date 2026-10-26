@@ -148,6 +148,62 @@ def _parse_float_range(
     return val
 
 
+def _parse_anim_fps(var_name: str, value_str: str | None, default: int = 24) -> int:
+    """Parse and validate ANIM_FPS configuration variable (between 10 and 30).
+
+    Args:
+        var_name: Name of the environment variable.
+        value_str: Raw string value from the environment.
+        default: Default value used when value_str is None.
+
+    Returns:
+        The validated integer between 10 and 30.
+
+    Raises:
+        ConfigError: If value_str is not an integer or outside [10, 30].
+    """
+    if value_str is None:
+        return default
+    try:
+        val = int(value_str)
+    except ValueError as exc:
+        raise ConfigError(
+            f"Invalid integer for {var_name}: {value_str!r}.",
+            hint=f"Set {var_name} to an integer between 10 and 30.",
+        ) from exc
+    if not (10 <= val <= 30):
+        raise ConfigError(
+            f"{var_name} must be between 10 and 30, got {val}.",
+            hint=f"Set {var_name} to an integer between 10 and 30.",
+        )
+    return val
+
+
+def _parse_anim_quality(var_name: str, value_str: str | None, default: str = "normal") -> str:
+    """Parse and validate ANIM_QUALITY configuration variable ('normal' or 'fast').
+
+    Args:
+        var_name: Name of the environment variable.
+        value_str: Raw string value from the environment.
+        default: Default quality used when value_str is None.
+
+    Returns:
+        The validated quality string ('normal' or 'fast').
+
+    Raises:
+        ConfigError: If the quality is not 'normal' or 'fast'.
+    """
+    if value_str is None:
+        return default
+    val = value_str.strip().lower()
+    if val not in ("normal", "fast"):
+        raise ConfigError(
+            f"{var_name} must be 'normal' or 'fast', got {value_str!r}.",
+            hint=f"Set {var_name} to 'normal' or 'fast'.",
+        )
+    return val
+
+
 def _parse_provider(var_name: str, value_str: str | None, default: str) -> str:
     """Parse and validate the LLM provider configuration variable.
 
@@ -194,6 +250,8 @@ class Settings:
         video_fps: Output video frame rate.
         scene_pause_seconds: Duration in seconds to pause between scenes.
         voice_speed: Speech rate multiplier for TTS audio (between 0.5 and 1.5).
+        anim_fps: Frame rate for animation capture (between 10 and 30, default 24).
+        anim_quality: Quality preset for animation ('normal' or 'fast', default 'normal').
     """
 
     github_token: str | None = None
@@ -211,6 +269,8 @@ class Settings:
     video_fps: int = 30
     scene_pause_seconds: float = 0.6
     voice_speed: float = 1.0
+    anim_fps: int = 24
+    anim_quality: str = "normal"
 
     def __post_init__(self) -> None:
         """Validate settings constraints upon initialization.
@@ -309,6 +369,26 @@ class Settings:
                 f"VOICE_SPEED must be between 0.5 and 1.5, got {self.voice_speed}.",
                 hint="Set VOICE_SPEED to a number between 0.5 and 1.5.",
             )
+        if not isinstance(self.anim_fps, int) or isinstance(self.anim_fps, bool):
+            raise ConfigError(
+                f"Invalid integer for ANIM_FPS: {self.anim_fps!r}.",
+                hint="Set ANIM_FPS to an integer between 10 and 30.",
+            )
+        if not (10 <= self.anim_fps <= 30):
+            raise ConfigError(
+                f"ANIM_FPS must be between 10 and 30, got {self.anim_fps}.",
+                hint="Set ANIM_FPS to an integer between 10 and 30.",
+            )
+        if not isinstance(self.anim_quality, str):
+            raise ConfigError(
+                f"Invalid value for ANIM_QUALITY: {self.anim_quality!r}.",
+                hint="Set ANIM_QUALITY to 'normal' or 'fast'.",
+            )
+        if self.anim_quality.strip().lower() not in ("normal", "fast"):
+            raise ConfigError(
+                f"ANIM_QUALITY must be 'normal' or 'fast', got {self.anim_quality!r}.",
+                hint="Set ANIM_QUALITY to 'normal' or 'fast'.",
+            )
 
     def __repr__(self) -> str:
         """Return a string representation of Settings with secrets masked.
@@ -334,7 +414,9 @@ class Settings:
             f"video_height={self.video_height!r}, "
             f"video_fps={self.video_fps!r}, "
             f"scene_pause_seconds={self.scene_pause_seconds!r}, "
-            f"voice_speed={self.voice_speed!r}"
+            f"voice_speed={self.voice_speed!r}, "
+            f"anim_fps={self.anim_fps!r}, "
+            f"anim_quality={self.anim_quality!r}"
             f")"
         )
 
@@ -374,6 +456,8 @@ def get_settings() -> Settings:
         "SCENE_PAUSE_SECONDS", os.environ.get("SCENE_PAUSE_SECONDS"), 0.6
     )
     voice_speed = _parse_float_range("VOICE_SPEED", os.environ.get("VOICE_SPEED"), 1.0, 0.5, 1.5)
+    anim_fps = _parse_anim_fps("ANIM_FPS", os.environ.get("ANIM_FPS"), 24)
+    anim_quality = _parse_anim_quality("ANIM_QUALITY", os.environ.get("ANIM_QUALITY"), "normal")
 
     return Settings(
         github_token=github_token,
@@ -391,4 +475,6 @@ def get_settings() -> Settings:
         video_fps=video_fps,
         scene_pause_seconds=scene_pause_seconds,
         voice_speed=voice_speed,
+        anim_fps=anim_fps,
+        anim_quality=anim_quality,
     )
