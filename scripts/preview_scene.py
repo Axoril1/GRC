@@ -10,9 +10,20 @@ from PIL import Image, ImageDraw
 from repo2video.anim import AnimationRenderer
 from repo2video.config import get_settings
 from repo2video.media import MediaAsset
-from repo2video.models import FocusRange, KeyFile, Scene, TerminalSession
+from repo2video.models import (
+    ArchitectureSpec,
+    EdgeSpec,
+    FocusRange,
+    KeyFile,
+    NodeSpec,
+    RepoData,
+    Scene,
+    TerminalSession,
+)
+from repo2video.scene_arch import build_arch_html
 from repo2video.scene_code import build_code_html
 from repo2video.scene_media import build_media_html
+from repo2video.scene_stats import build_stats_html
 from repo2video.scene_terminal import build_terminal_html
 
 
@@ -218,6 +229,76 @@ def generate_preview(
             duration=duration,
             settings=settings,
         )
+    elif scene_type == "arch":
+        spec = ArchitectureSpec(
+            nodes=[
+                NodeSpec(id="cli", label="CLI Entrypoint", group="input"),
+                NodeSpec(id="analyzer", label="Repo Analyzer", group="core"),
+                NodeSpec(id="scriptwriter", label="LLM Writer", group="core"),
+                NodeSpec(id="anim", label="Anim Engine", group="core"),
+                NodeSpec(id="muxer", label="FFmpeg Muxer", group="output"),
+                NodeSpec(id="storage", label="Asset Cache", group="storage"),
+            ],
+            edges=[
+                EdgeSpec(source="cli", target="analyzer", label="Repo URL"),
+                EdgeSpec(source="analyzer", target="scriptwriter", label="RepoData"),
+                EdgeSpec(source="scriptwriter", target="anim", label="ScriptData"),
+                EdgeSpec(source="anim", target="muxer", label="Clips"),
+                EdgeSpec(source="analyzer", target="storage", label="media assets"),
+                EdgeSpec(source="anim", target="storage", label="reads"),
+            ],
+        )
+        scene = Scene(
+            id=4,
+            type="architecture",
+            heading="Pipeline Architecture",
+            narration="Here is an overview of the modular end-to-end processing pipeline from repository URL to final video.",
+            architecture=spec,
+        )
+        html = build_arch_html(
+            scene,
+            spec,
+            theme=theme,
+            accent=accent,
+            repo_label=repo_label,
+            duration=duration,
+            settings=settings,
+        )
+
+    elif scene_type == "stats":
+        repo = RepoData(
+            owner="Axoril1",
+            name="repo2video",
+            description="Turn any public GitHub repository into a polished narrated demo video.",
+            stars=1250,
+            forks=140,
+            open_issues=8,
+            license="MIT",
+            pushed_at="2026-10-25T18:30:00Z",
+            language_percentages={
+                "Python": 84.5,
+                "JavaScript": 8.5,
+                "HTML": 4.5,
+                "CSS": 2.5,
+            },
+            topics=["video-generation", "playwright", "ffmpeg", "piper-tts", "automation"],
+        )
+        scene = Scene(
+            id=5,
+            type="stats",
+            heading="Project Stats & Languages",
+            narration="Here is a snapshot of repository metrics, open source engagement, and technology breakdown across the codebase.",
+            stat_keys=["stars", "forks", "updated", "languages"],
+        )
+        html = build_stats_html(
+            scene,
+            repo,
+            theme=theme,
+            accent=accent,
+            repo_label=repo_label,
+            duration=duration,
+            settings=settings,
+        )
     else:
         print(f"Unknown scene type: {scene_type}")
         return
@@ -242,7 +323,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Render animated scene previews.")
     parser.add_argument(
         "--scene-type",
-        choices=["code", "terminal", "media", "all"],
+        choices=["code", "terminal", "media", "arch", "stats", "all"],
         default="all",
         help="Scene type to preview (default: all)",
     )
@@ -272,7 +353,11 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    scene_types = ["code", "terminal", "media"] if args.scene_type == "all" else [args.scene_type]
+    scene_types = (
+        ["code", "terminal", "media", "arch", "stats"]
+        if args.scene_type == "all"
+        else [args.scene_type]
+    )
     themes = ["dark", "light"] if args.theme == "both" else [args.theme]
 
     for st in scene_types:
