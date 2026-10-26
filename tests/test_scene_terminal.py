@@ -7,10 +7,10 @@ import io
 import pytest
 from PIL import Image
 
-from repo2video.anim import AnimationRenderer
-from repo2video.errors import SceneError
-from repo2video.models import Scene, TerminalSession
-from repo2video.scene_terminal import build_terminal_html, terminal_schedule
+from GRC.anim import AnimationRenderer
+from GRC.errors import SceneError
+from GRC.models import Scene, TerminalSession
+from GRC.scene_terminal import build_terminal_html, terminal_schedule
 
 
 def is_chromium_available() -> bool:
@@ -100,7 +100,7 @@ def test_terminal_schedule_drops_commands_only_after_compression() -> None:
         "pip install -r requirements.txt",
         "python setup.py build_ext --inplace",
         "pytest tests/",
-        "python -m repo2video.cli --help",
+        "python -m GRC.cli --help",
     ]
     out = ["All tests passed successfully."]
 

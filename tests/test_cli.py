@@ -8,12 +8,12 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from repo2video import __version__
-from repo2video.cli import app
-from repo2video.config import Settings
-from repo2video.errors import Repo2VideoError
-from repo2video.models import RepoData, Scene, ScriptData
-from repo2video.pipeline import DoctorCheck, PipelineOptions, PipelineResult
+from GRC import __version__
+from GRC.cli import app
+from GRC.config import Settings
+from GRC.errors import Repo2VideoError
+from GRC.models import RepoData, Scene, ScriptData
+from GRC.pipeline import DoctorCheck, PipelineOptions, PipelineResult
 
 runner = CliRunner()
 
@@ -63,12 +63,12 @@ def test_version() -> None:
     """Verify --version option outputs application version and exits 0."""
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert f"repo2video {__version__}" in result.output
+    assert f"GRC {__version__}" in result.output
 
     # Short flag -v
     res_short = runner.invoke(app, ["-v"])
     assert res_short.exit_code == 0
-    assert f"repo2video {__version__}" in res_short.output
+    assert f"GRC {__version__}" in res_short.output
 
 
 def test_make_success(
@@ -93,7 +93,7 @@ def test_make_success(
         options.on_stage("render", 5, 5)
         return mock_pipeline_result
 
-    monkeypatch.setattr("repo2video.cli.run_pipeline", fake_run)
+    monkeypatch.setattr("GRC.cli.run_pipeline", fake_run)
 
     result = runner.invoke(app, ["make", "https://github.com/owner/test-repo"])
     assert result.exit_code == 0
@@ -140,7 +140,7 @@ def test_make_script_only(
         options.on_stage("script", 2, 2)
         return script_result
 
-    monkeypatch.setattr("repo2video.cli.run_pipeline", fake_run)
+    monkeypatch.setattr("GRC.cli.run_pipeline", fake_run)
 
     result = runner.invoke(app, ["make", "https://github.com/owner/test-repo", "--script-only"])
     assert result.exit_code == 0
@@ -164,7 +164,7 @@ def test_make_option_overrides(
         recorded["options"] = options
         return mock_pipeline_result
 
-    monkeypatch.setattr("repo2video.cli.run_pipeline", fake_run)
+    monkeypatch.setattr("GRC.cli.run_pipeline", fake_run)
 
     custom_out = tmp_path / "custom.mp4"
     result = runner.invoke(
@@ -248,7 +248,7 @@ def test_make_expected_error_formatting(
             hint="Check repository URL and privacy.",
         )
 
-    monkeypatch.setattr("repo2video.cli.run_pipeline", fake_run)
+    monkeypatch.setattr("GRC.cli.run_pipeline", fake_run)
 
     result = runner.invoke(app, ["make", "https://github.com/psf/requests"])
     assert result.exit_code == 1
@@ -270,7 +270,7 @@ def test_make_keyboard_interrupt(
     ) -> PipelineResult:
         raise KeyboardInterrupt()
 
-    monkeypatch.setattr("repo2video.cli.run_pipeline", fake_run)
+    monkeypatch.setattr("GRC.cli.run_pipeline", fake_run)
 
     result = runner.invoke(
         app, ["make", "https://github.com/owner/test-repo", "--out", str(target_out)]
@@ -291,14 +291,14 @@ def test_make_unexpected_exception_writes_crash_log(
     def fake_get_settings() -> Settings:
         return Settings(output_dir=out_dir)
 
-    monkeypatch.setattr("repo2video.cli.get_settings", fake_get_settings)
+    monkeypatch.setattr("GRC.cli.get_settings", fake_get_settings)
 
     def fake_run(
         url: str, out: Path | None, settings: Settings, options: PipelineOptions
     ) -> PipelineResult:
         raise RuntimeError("Unexpected internal crash during pipeline orchestration")
 
-    monkeypatch.setattr("repo2video.cli.run_pipeline", fake_run)
+    monkeypatch.setattr("GRC.cli.run_pipeline", fake_run)
 
     result = runner.invoke(app, ["make", "https://github.com/owner/test-repo"])
     assert result.exit_code == 1
@@ -336,7 +336,7 @@ def test_render_command_accepts_file_and_folder(
         recorded_paths.append(scenes_json)
         return mock_pipeline_result
 
-    monkeypatch.setattr("repo2video.cli.render_only", fake_render_only)
+    monkeypatch.setattr("GRC.cli.render_only", fake_render_only)
 
     # 1. Passing scenes.json file directly
     res1 = runner.invoke(app, ["render", str(scenes_file), "--label", "owner/manual"])
@@ -385,7 +385,7 @@ def test_render_command_label_inference(
         recorded_label.append(repo_label)
         return mock_pipeline_result
 
-    monkeypatch.setattr("repo2video.cli.render_only", fake_render_only)
+    monkeypatch.setattr("GRC.cli.render_only", fake_render_only)
 
     res = runner.invoke(app, ["render", str(scenes_file)])
     assert res.exit_code == 0
@@ -405,7 +405,7 @@ def test_doctor_command_all_ok(
         DoctorCheck(name="GITHUB_TOKEN", ok=True, status="set", required=False),
     ]
 
-    monkeypatch.setattr("repo2video.cli.check_doctor", lambda s: checks)
+    monkeypatch.setattr("GRC.cli.check_doctor", lambda s: checks)
 
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0
@@ -443,7 +443,7 @@ def test_doctor_command_mixed_failures(
         DoctorCheck(name="GITHUB_TOKEN", ok=True, status="not set", required=False),
     ]
 
-    monkeypatch.setattr("repo2video.cli.check_doctor", lambda s: checks)
+    monkeypatch.setattr("GRC.cli.check_doctor", lambda s: checks)
 
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 1

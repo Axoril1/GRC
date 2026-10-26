@@ -20,16 +20,16 @@ from typing import Any
 
 from PIL import Image
 
-from repo2video import __version__
-from repo2video import scenes as _scenes
-from repo2video.analyzer import analyze, parse_repo_url
-from repo2video.anim import AnimationRenderer
-from repo2video.config import Settings, get_settings
-from repo2video.errors import Repo2VideoError, SceneError
-from repo2video.llm import get_client
-from repo2video.media import collect_media, credit_line
-from repo2video.models import KeyFile, MediaAsset, RepoData, ScriptData, TerminalSession
-from repo2video.render import (
+from GRC import __version__
+from GRC import scenes as _scenes
+from GRC.analyzer import analyze, parse_repo_url
+from GRC.anim import AnimationRenderer
+from GRC.config import Settings, get_settings
+from GRC.errors import Repo2VideoError, SceneError
+from GRC.llm import get_client
+from GRC.media import collect_media, credit_line
+from GRC.models import KeyFile, MediaAsset, RepoData, ScriptData, TerminalSession
+from GRC.render import (
     RenderOptions,
     SceneAssets,
     SceneVisual,
@@ -39,18 +39,18 @@ from repo2video.render import (
     render_video,
     scene_video_lengths,
 )
-from repo2video.scene_arch import build_arch_html
-from repo2video.scene_code import build_code_html
-from repo2video.scene_media import build_clip_frame_html, build_media_html, media_frame_rect
-from repo2video.scene_stats import build_stats_html
-from repo2video.scene_terminal import build_terminal_html
-from repo2video.scenes import (
+from GRC.scene_arch import build_arch_html
+from GRC.scene_code import build_code_html
+from GRC.scene_media import build_clip_frame_html, build_media_html, media_frame_rect
+from GRC.scene_stats import build_stats_html
+from GRC.scene_terminal import build_terminal_html
+from GRC.scenes import (
     build_html,
     check_chromium,
     screenshot_html,
 )
-from repo2video.scriptwriter import resolve_references, write_script
-from repo2video.voice import PiperEngine, SceneAudio, synthesize_all
+from GRC.scriptwriter import resolve_references, write_script
+from GRC.voice import PiperEngine, SceneAudio, synthesize_all
 
 # Backward compatibility alias for test monkeypatching
 render_scenes = _scenes.render_scenes

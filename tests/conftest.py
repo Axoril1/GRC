@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-import repo2video.config
-from repo2video.config import get_settings
+import GRC.config
+from GRC.config import get_settings
 
 ENV_KEYS = [
     "GITHUB_TOKEN",
@@ -27,7 +27,7 @@ ENV_KEYS = [
 ]
 
 REPO_ROOT_ENV = (Path(__file__).parent.parent / ".env").resolve()
-ORIGINAL_LOAD_DOTENV = repo2video.config.load_dotenv
+ORIGINAL_LOAD_DOTENV = GRC.config.load_dotenv
 
 
 def _test_load_dotenv(dotenv_path: Path | None = None) -> None:
@@ -42,7 +42,7 @@ def isolate_test_environment(monkeypatch: pytest.MonkeyPatch) -> Generator[None,
     """Prevent tests from reading local root .env while allowing custom test .env loading."""
     for key in ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
-    monkeypatch.setattr("repo2video.config.load_dotenv", _test_load_dotenv)
+    monkeypatch.setattr("GRC.config.load_dotenv", _test_load_dotenv)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from repo2video.analyzer import (
+from GRC.analyzer import (
     _calculate_language_percentages,
     analyze,
     clean_readme,
@@ -20,9 +20,9 @@ from repo2video.analyzer import (
     resolve_relative_url,
     score_key_file,
 )
-from repo2video.config import Settings
-from repo2video.errors import AnalyzerError
-from repo2video.models import RepoData
+from GRC.config import Settings
+from GRC.errors import AnalyzerError
+from GRC.models import RepoData
 
 
 class FakeResponse:
@@ -222,7 +222,7 @@ def test_clean_readme_never_cuts_inside_fence() -> None:
 
 def test_process_tree_noise_filtering_and_sort() -> None:
     """Verify tree processing filters hidden items, locks, caches, and sorts dirs first."""
-    from repo2video.analyzer import _process_tree
+    from GRC.analyzer import _process_tree
 
     raw_items = [
         {"path": ".git", "type": "tree"},
@@ -262,7 +262,7 @@ def test_process_tree_noise_filtering_and_sort() -> None:
 
 def test_process_languages_dropping_minor() -> None:
     """Verify languages below 2% threshold are dropped, but top 5 are kept."""
-    from repo2video.analyzer import _process_languages
+    from GRC.analyzer import _process_languages
 
     data = {
         "Python": 9000,

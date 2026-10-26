@@ -14,16 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from repo2video.captions import (
+from GRC.captions import (
     Cue,
     build_cues,
     format_srt_timestamp,
     render_caption_images,
 )
-from repo2video.captions import write_srt as captions_write_srt
-from repo2video.config import Settings, get_settings
-from repo2video.errors import RenderError
-from repo2video.scene_media import Rect, media_frame_rect
+from GRC.captions import write_srt as captions_write_srt
+from GRC.config import Settings, get_settings
+from GRC.errors import RenderError
+from GRC.scene_media import Rect, media_frame_rect
 
 logger = logging.getLogger(__name__)
 
@@ -1585,7 +1585,7 @@ def render_video(
 def main() -> None:
     """CLI entrypoint to check FFmpeg version and readiness."""
     parser = argparse.ArgumentParser(
-        description="repo2video renderer: compose slides and audio into an MP4 video."
+        description="GRC renderer: compose slides and audio into an MP4 video."
     )
     parser.add_argument(
         "--check",

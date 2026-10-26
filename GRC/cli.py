@@ -12,23 +12,23 @@ from typing import Annotated, Any
 
 import typer
 
-from repo2video import __version__
-from repo2video.config import Settings, get_settings
-from repo2video.errors import Repo2VideoError
-from repo2video.logging_setup import setup_logging
-from repo2video.models import RepoData, ScriptData
-from repo2video.pipeline import (
+from GRC import __version__
+from GRC.config import Settings, get_settings
+from GRC.errors import Repo2VideoError
+from GRC.logging_setup import setup_logging
+from GRC.models import RepoData, ScriptData
+from GRC.pipeline import (
     PipelineOptions,
     PipelineResult,
     check_doctor,
     render_only,
 )
-from repo2video.pipeline import run as run_pipeline
+from GRC.pipeline import run as run_pipeline
 
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
-    name="repo2video",
+    name="grc",
     help="Turn a public GitHub repository into a narrated demo video.",
     no_args_is_help=True,
 )
@@ -49,7 +49,7 @@ ALLOWED_MUSIC_EXTENSIONS: frozenset[str] = frozenset([".mp3", ".wav", ".ogg", ".
 def _version_callback(value: bool) -> None:
     """Print the package version and exit."""
     if value:
-        typer.echo(f"repo2video {__version__}")
+        typer.echo(f"GRC {__version__}")
         raise typer.Exit()
 
 
@@ -66,7 +66,7 @@ def main(
         ),
     ] = None,
 ) -> None:
-    """repo2video CLI: Turn GitHub repositories into narrated demo videos."""
+    """GRC CLI: Turn GitHub repositories into narrated demo videos."""
 
 
 class _StageProgressTracker:

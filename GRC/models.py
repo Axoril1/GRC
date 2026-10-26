@@ -10,7 +10,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from repo2video.errors import Repo2VideoError
+from GRC.errors import Repo2VideoError
 
 V1_SCENE_TYPES = ("title", "problem", "feature", "howto", "outro")
 V2_SCENE_TYPES = ("media", "code", "terminal", "architecture", "stats")

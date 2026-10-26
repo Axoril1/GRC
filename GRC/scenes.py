@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING, Any
 
 from playwright.sync_api import Route, sync_playwright
 
-from repo2video.config import get_settings
-from repo2video.errors import Repo2VideoError, SceneError
-from repo2video.models import Scene, ScriptData
+from GRC.config import get_settings
+from GRC.errors import Repo2VideoError, SceneError
+from GRC.models import Scene, ScriptData
 
 if TYPE_CHECKING:
-    from repo2video.config import Settings
+    from GRC.config import Settings
 
 logger = logging.getLogger(__name__)
 

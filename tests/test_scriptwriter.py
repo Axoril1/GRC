@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-from repo2video.config import Settings
-from repo2video.errors import LLMError, ScriptError
-from repo2video.models import (
+from GRC.config import Settings
+from GRC.errors import LLMError, ScriptError
+from GRC.models import (
     ArchitectureSpec,
     EdgeSpec,
     FocusRange,
@@ -24,8 +24,8 @@ from repo2video.models import (
     ScriptData,
     TerminalSession,
 )
-from repo2video.prompts import REPAIR_PROMPT, SYSTEM_PROMPT, build_user_message
-from repo2video.scriptwriter import (
+from GRC.prompts import REPAIR_PROMPT, SYSTEM_PROMPT, build_user_message
+from GRC.scriptwriter import (
     check_facts,
     estimate_duration_seconds,
     main,
@@ -553,7 +553,7 @@ class TestMainCLI:
 
         valid_json = json.dumps(make_valid_script_dict())
         fake_client = FakeClient([valid_json])
-        monkeypatch.setattr("repo2video.scriptwriter.get_client", lambda: fake_client)
+        monkeypatch.setattr("GRC.scriptwriter.get_client", lambda: fake_client)
         monkeypatch.setattr("sys.argv", ["scriptwriter", str(repo_path)])
 
         main()
@@ -577,7 +577,7 @@ class TestMainCLI:
 
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
-        assert "Usage: python -m repo2video.scriptwriter" in captured.err
+        assert "Usage: python -m GRC.scriptwriter" in captured.err
 
     def test_main_repo_not_found_exits_1(
         self,

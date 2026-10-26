@@ -15,8 +15,8 @@ import pytest
 import requests
 from PIL import Image
 
-from repo2video.config import Settings
-from repo2video.media import (
+from GRC.config import Settings
+from GRC.media import (
     MediaAsset,
     capture_homepage,
     collect_media,
@@ -26,7 +26,7 @@ from repo2video.media import (
     is_public_url,
     process_image,
 )
-from repo2video.models import MediaRef, RepoData
+from GRC.models import MediaRef, RepoData
 
 
 def _create_test_image(
@@ -166,7 +166,7 @@ class TestDownloading:
         session.get.return_value = redirect_resp
 
         ref = MediaRef(id="m1", url="https://example.com/redirect.png", kind="image")
-        with patch("repo2video.media.is_public_url", side_effect=lambda u: "192.168" not in u):
+        with patch("GRC.media.is_public_url", side_effect=lambda u: "192.168" not in u):
             res = download_media(ref, tmp_path, session=session)
 
         assert res is None
@@ -188,7 +188,7 @@ class TestDownloading:
         session.get.side_effect = mock_get
         ref = MediaRef(id="m1", url="https://example.com/hop/1.png", kind="image")
 
-        with patch("repo2video.media.is_public_url", return_value=True):
+        with patch("GRC.media.is_public_url", return_value=True):
             res = download_media(ref, tmp_path, session=session)
 
         assert res is None
@@ -205,7 +205,7 @@ class TestDownloading:
         session.get.return_value = _mock_response(big_payload)
 
         ref = MediaRef(id="m1", url="https://example.com/huge.png", kind="image")
-        with patch("repo2video.media.is_public_url", return_value=True):
+        with patch("GRC.media.is_public_url", return_value=True):
             res = download_media(ref, tmp_path, session=session)
 
         assert res is None
@@ -218,7 +218,7 @@ class TestDownloading:
         session.get.return_value = _mock_response(b"INVALID_MAGIC_BYTES_1234567890")
 
         ref = MediaRef(id="m1", url="https://example.com/bad_magic.png", kind="image")
-        with patch("repo2video.media.is_public_url", return_value=True):
+        with patch("GRC.media.is_public_url", return_value=True):
             res = download_media(ref, tmp_path, session=session)
 
         assert res is None
@@ -234,7 +234,7 @@ class TestDownloading:
         session.get.return_value = _mock_response(valid_png, headers={"Content-Type": "text/html"})
 
         ref = MediaRef(id="m1", url="https://example.com/actually_png.html", kind="image")
-        with patch("repo2video.media.is_public_url", return_value=True):
+        with patch("GRC.media.is_public_url", return_value=True):
             res = download_media(ref, tmp_path, session=session)
 
         assert res is not None
@@ -246,7 +246,7 @@ class TestDownloading:
             b"<!DOCTYPE html><html>404</html>", headers={"Content-Type": "image/png"}
         )
         ref2 = MediaRef(id="m2", url="https://example.com/fake.png", kind="image")
-        with patch("repo2video.media.is_public_url", return_value=True):
+        with patch("GRC.media.is_public_url", return_value=True):
             res2 = download_media(ref2, tmp_path, session=session)
 
         assert res2 is None
@@ -352,7 +352,7 @@ class TestRankingAndSelection:
             ],
         )
 
-        with patch("repo2video.media.is_public_url", return_value=True):
+        with patch("GRC.media.is_public_url", return_value=True):
             assets = collect_media(repo, tmp_path, Settings(), session=session, limit=1)
 
         assert len(assets) == 1
@@ -391,9 +391,9 @@ class TestRankingAndSelection:
             return (target_dir / f"{asset_id}.png", 1280, 720)
 
         with (
-            patch("repo2video.media.download_media", side_effect=mock_download),
-            patch("repo2video.media.convert_to_clip", side_effect=mock_clip),
-            patch("repo2video.media.process_image", side_effect=mock_image),
+            patch("GRC.media.download_media", side_effect=mock_download),
+            patch("GRC.media.convert_to_clip", side_effect=mock_clip),
+            patch("GRC.media.process_image", side_effect=mock_image),
         ):
             assets = collect_media(repo, tmp_path, Settings(), limit=4, force=True)
 

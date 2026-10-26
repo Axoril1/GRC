@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from repo2video.config import Settings
-from repo2video.errors import RenderError
-from repo2video.render import (
+from GRC.config import Settings
+from GRC.errors import RenderError
+from GRC.render import (
     SceneAssets,
     build_concat_list,
     build_segment_command,

@@ -7,14 +7,14 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from repo2video.captions import (
+from GRC.captions import (
     Cue,
     build_cues,
     format_srt_timestamp,
     render_caption_images,
     write_srt,
 )
-from repo2video.config import Settings
+from GRC.config import Settings
 
 
 def is_chromium_available() -> bool:

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from repo2video.config import Settings, get_settings
-from repo2video.errors import ConfigError
+from GRC.config import Settings, get_settings
+from GRC.errors import ConfigError
 
 ENV_KEYS = [
     "GITHUB_TOKEN",

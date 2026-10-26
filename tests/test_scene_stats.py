@@ -8,10 +8,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from PIL import Image
 
-from repo2video.anim import AnimationRenderer
-from repo2video.errors import SceneError
-from repo2video.models import RepoData, Scene
-from repo2video.scene_stats import (
+from GRC.anim import AnimationRenderer
+from GRC.errors import SceneError
+from GRC.models import RepoData, Scene
+from GRC.scene_stats import (
     build_stats_html,
     format_count,
     relative_time,

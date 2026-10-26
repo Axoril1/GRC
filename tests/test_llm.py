@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 import requests
 
-from repo2video.config import Settings
-from repo2video.errors import ConfigError, LLMError
-from repo2video.llm import (
+from GRC.config import Settings
+from GRC.errors import ConfigError, LLMError
+from GRC.llm import (
     OllamaClient,
     OpenAICompatibleClient,
     _build_endpoint_url,
@@ -799,9 +799,9 @@ class TestMainExecution:
             settings=Settings(llm_model="qwen2.5:7b"),
             session=session,  # type: ignore[arg-type]
         )
-        monkeypatch.setattr("repo2video.llm.get_client", lambda: fake_client)
+        monkeypatch.setattr("GRC.llm.get_client", lambda: fake_client)
 
-        from repo2video.llm import main
+        from GRC.llm import main
 
         main()
 
@@ -816,9 +816,9 @@ class TestMainExecution:
             settings=Settings(llm_base_url="http://localhost:11434"),
             session=session,  # type: ignore[arg-type]
         )
-        monkeypatch.setattr("repo2video.llm.get_client", lambda: fake_client)
+        monkeypatch.setattr("GRC.llm.get_client", lambda: fake_client)
 
-        from repo2video.llm import main
+        from GRC.llm import main
 
         with pytest.raises(SystemExit) as exc_info:
             main()

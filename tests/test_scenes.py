@@ -8,10 +8,10 @@ from typing import Any
 
 import pytest
 
-from repo2video.config import Settings
-from repo2video.errors import SceneError
-from repo2video.models import Scene, ScriptData
-from repo2video.scenes import (
+from GRC.config import Settings
+from GRC.errors import SceneError
+from GRC.models import Scene, ScriptData
+from GRC.scenes import (
     DEFAULT_ACCENT,
     build_html,
     main,
@@ -221,7 +221,7 @@ class TestBuildHtmlFast:
 
     def test_new_scene_types_render_with_feature_layout(self) -> None:
         """Verify new v2 scene types render with feature layout (badge and bullets) as fallbacks."""
-        from repo2video.models import ArchitectureSpec, NodeSpec
+        from GRC.models import ArchitectureSpec, NodeSpec
 
         narr = (
             "This is a standard narration sentence designed for testing automated slide "

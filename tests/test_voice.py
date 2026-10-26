@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
-from repo2video.errors import VoiceError
-from repo2video.models import Scene, ScriptData
-from repo2video.voice import (
+from GRC.errors import VoiceError
+from GRC.models import Scene, ScriptData
+from GRC.voice import (
     DEFAULT_PRONUNCIATIONS,
     PiperEngine,
     SceneAudio,
@@ -634,7 +634,7 @@ def test_main_check_ready_success(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Verify main --check prints ready message and exits 0."""
-    monkeypatch.setattr("sys.argv", ["repo2video.voice", "--check"])
+    monkeypatch.setattr("sys.argv", ["GRC.voice", "--check"])
 
     def mock_check_ready(self: PiperEngine) -> None:
         pass
@@ -652,7 +652,7 @@ def test_main_check_ready_failure(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Verify main --check prints error to stderr and exits 1 when unready."""
-    monkeypatch.setattr("sys.argv", ["repo2video.voice", "--check"])
+    monkeypatch.setattr("sys.argv", ["GRC.voice", "--check"])
 
     def mock_check_ready(self: PiperEngine) -> None:
         raise VoiceError(
@@ -676,7 +676,7 @@ def test_main_synthesize_script(
     script_file = tmp_path / "scenes.json"
     script.save(script_file)
 
-    monkeypatch.setattr("sys.argv", ["repo2video.voice", str(script_file)])
+    monkeypatch.setattr("sys.argv", ["GRC.voice", str(script_file)])
 
     def mock_check_ready(self: PiperEngine) -> None:
         pass

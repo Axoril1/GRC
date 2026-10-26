@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
-from repo2video.config import get_settings
-from repo2video.errors import LLMError, Repo2VideoError, ScriptError
-from repo2video.llm import extract_json, get_client
-from repo2video.models import (
+from GRC.config import get_settings
+from GRC.errors import LLMError, Repo2VideoError, ScriptError
+from GRC.llm import extract_json, get_client
+from GRC.models import (
     V2_SCENE_TYPES,
     VALID_NODE_GROUPS,
     VALID_STAT_KEYS,
@@ -29,11 +29,11 @@ from repo2video.models import (
     format_validation_error,
     word_count,
 )
-from repo2video.prompts import REPAIR_PROMPT, SYSTEM_PROMPT, build_user_message
+from GRC.prompts import REPAIR_PROMPT, SYSTEM_PROMPT, build_user_message
 
 if TYPE_CHECKING:
-    from repo2video.config import Settings
-    from repo2video.llm import LLMClient
+    from GRC.config import Settings
+    from GRC.llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -935,7 +935,7 @@ def write_script(
 def main() -> None:
     """CLI entrypoint for turning a repo.json into scenes.json."""
     if len(sys.argv) < 2:
-        sys.stderr.write("Usage: python -m repo2video.scriptwriter <path/to/repo.json>\n")
+        sys.stderr.write("Usage: python -m GRC.scriptwriter <path/to/repo.json>\n")
         sys.exit(1)
 
     repo_path = Path(sys.argv[1])

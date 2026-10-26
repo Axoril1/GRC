@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "repo2video"
+name = "GRC"
 version = "0.1.0"
 description = "Turn a public GitHub repository URL into a narrated demo video."
 readme = "README.md"
@@ -26,15 +26,18 @@ dev = [
 ]
 
 [project.scripts]
-grc = "repo2video.cli:app"
-repo2video = "repo2video.cli:app"
+grc = "GRC.cli:app"
+repo2video = "GRC.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["repo2video*"]
+include = ["GRC*"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
+ignore = ["N999"]
 
 [tool.pytest.ini_options]
 markers = [

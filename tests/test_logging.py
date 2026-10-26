@@ -2,7 +2,7 @@
 
 import logging
 
-from repo2video.logging_setup import setup_logging
+from GRC.logging_setup import setup_logging
 
 
 def test_setup_logging_standard() -> None:

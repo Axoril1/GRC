@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from repo2video.errors import Repo2VideoError
-from repo2video.models import (
+from GRC.errors import Repo2VideoError
+from GRC.models import (
     ArchitectureSpec,
     EdgeSpec,
     FocusRange,

@@ -13,12 +13,12 @@ from typing import TYPE_CHECKING, Any
 
 import requests
 
-from repo2video.config import get_settings
-from repo2video.errors import AnalyzerError, Repo2VideoError
-from repo2video.models import KeyFile, MediaRef, RepoData, TerminalSession
+from GRC.config import get_settings
+from GRC.errors import AnalyzerError, Repo2VideoError
+from GRC.models import KeyFile, MediaRef, RepoData, TerminalSession
 
 if TYPE_CHECKING:
-    from repo2video.config import Settings
+    from GRC.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -1233,7 +1233,7 @@ def analyze(
     should_close = session is None
 
     # Base headers
-    sess.headers["User-Agent"] = "repo2video/0.1"
+    sess.headers["User-Agent"] = "GRC/0.1"
     sess.headers["Accept"] = "application/vnd.github+json"
     sess.headers["X-GitHub-Api-Version"] = "2022-11-28"
     if resolved_settings.github_token:
@@ -1470,7 +1470,7 @@ def analyze(
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        sys.stderr.write("Usage: python -m repo2video.analyzer <repository_url>\n")
+        sys.stderr.write("Usage: python -m GRC.analyzer <repository_url>\n")
         sys.exit(1)
 
     target_url = sys.argv[1]

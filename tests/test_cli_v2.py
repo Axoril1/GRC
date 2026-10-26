@@ -8,9 +8,9 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from repo2video.cli import app
-from repo2video.config import Settings
-from repo2video.pipeline import DoctorCheck, PipelineOptions, PipelineResult
+from GRC.cli import app
+from GRC.config import Settings
+from GRC.pipeline import DoctorCheck, PipelineOptions, PipelineResult
 
 runner = CliRunner()
 
@@ -72,7 +72,7 @@ def test_cli_six_stage_progress_output(
             options.on_stage("render", 6, 6)
         return dummy_result
 
-    monkeypatch.setattr("repo2video.cli.run_pipeline", fake_run)
+    monkeypatch.setattr("GRC.cli.run_pipeline", fake_run)
 
     res = runner.invoke(app, ["make", "https://github.com/test-owner/demo-repo"])
     assert res.exit_code == 0
@@ -99,7 +99,7 @@ def test_cli_script_only_three_stage_progress_output(
             options.on_stage("script", 3, 3)
         return dummy_result
 
-    monkeypatch.setattr("repo2video.cli.run_pipeline", fake_run)
+    monkeypatch.setattr("GRC.cli.run_pipeline", fake_run)
 
     res = runner.invoke(app, ["make", "https://github.com/test-owner/demo-repo", "--script-only"])
     assert res.exit_code == 0
@@ -148,7 +148,7 @@ def test_cli_music_rights_warning_printed(
     good_music = tmp_path / "ambient.mp3"
     good_music.write_bytes(b"MP3_DATA")
 
-    monkeypatch.setattr("repo2video.cli.run_pipeline", lambda *args, **kwargs: dummy_result)
+    monkeypatch.setattr("GRC.cli.run_pipeline", lambda *args, **kwargs: dummy_result)
 
     res = runner.invoke(app, ["make", "https://github.com/owner/repo", "--music", str(good_music)])
     assert res.exit_code == 0
@@ -182,7 +182,7 @@ def test_cli_fast_flag_overrides(
             captured_options.append(options)
         return dummy_result
 
-    monkeypatch.setattr("repo2video.cli.run_pipeline", fake_run)
+    monkeypatch.setattr("GRC.cli.run_pipeline", fake_run)
 
     res = runner.invoke(app, ["make", "https://github.com/owner/repo", "--fast"])
     assert res.exit_code == 0
@@ -201,7 +201,7 @@ def test_cli_summary_reports_scene_types_and_counts(
     monkeypatch: pytest.MonkeyPatch, dummy_result: PipelineResult
 ) -> None:
     """Verify summary output prints scene types with their counts."""
-    monkeypatch.setattr("repo2video.cli.run_pipeline", lambda *args, **kwargs: dummy_result)
+    monkeypatch.setattr("GRC.cli.run_pipeline", lambda *args, **kwargs: dummy_result)
 
     res = runner.invoke(app, ["make", "https://github.com/owner/repo"])
     assert res.exit_code == 0
@@ -217,7 +217,7 @@ def test_cli_summary_reports_fallbacks_in_yellow(
         {"scene_id": 5, "type": "code", "reason": "Pygments formatting error"},
         {"scene_id": 7, "type": "terminal", "reason": "Terminal replay parse failure"},
     ]
-    monkeypatch.setattr("repo2video.cli.run_pipeline", lambda *args, **kwargs: dummy_result)
+    monkeypatch.setattr("GRC.cli.run_pipeline", lambda *args, **kwargs: dummy_result)
 
     res = runner.invoke(app, ["make", "https://github.com/owner/repo"])
     assert res.exit_code == 0
@@ -232,7 +232,7 @@ def test_cli_summary_reports_no_media_hint_unless_disabled(
 ) -> None:
     """Verify no-media hint prints when media_count is 0, but is omitted when --no-media is passed."""
     dummy_result.media_count = 0
-    monkeypatch.setattr("repo2video.cli.run_pipeline", lambda *args, **kwargs: dummy_result)
+    monkeypatch.setattr("GRC.cli.run_pipeline", lambda *args, **kwargs: dummy_result)
 
     # 1. Normal run with 0 media: hint must appear
     res_normal = runner.invoke(app, ["make", "https://github.com/owner/repo"])
@@ -264,7 +264,7 @@ def test_cli_doctor_missing_xfade_shows_warn_and_exits_0(monkeypatch: pytest.Mon
             required=False,
         ),
     ]
-    monkeypatch.setattr("repo2video.cli.check_doctor", lambda settings: checks)
+    monkeypatch.setattr("GRC.cli.check_doctor", lambda settings: checks)
 
     res = runner.invoke(app, ["doctor"])
     assert res.exit_code == 0
@@ -285,7 +285,7 @@ def test_cli_doctor_missing_pillow_shows_fail_and_exits_1(monkeypatch: pytest.Mo
         ),
         DoctorCheck(name="Pygments syntax highlighter", ok=True, status="OK"),
     ]
-    monkeypatch.setattr("repo2video.cli.check_doctor", lambda settings: checks)
+    monkeypatch.setattr("GRC.cli.check_doctor", lambda settings: checks)
 
     res = runner.invoke(app, ["doctor"])
     assert res.exit_code == 1
@@ -314,7 +314,7 @@ def test_cli_render_command_passes_v2_options(
             captured_options.append(options)
         return dummy_result
 
-    monkeypatch.setattr("repo2video.cli.render_only", fake_render_only)
+    monkeypatch.setattr("GRC.cli.render_only", fake_render_only)
 
     res = runner.invoke(
         app,

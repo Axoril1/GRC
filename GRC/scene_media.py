@@ -11,14 +11,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from repo2video.anim import wrap_page
-from repo2video.errors import SceneError
-from repo2video.media import MediaAsset
-from repo2video.models import Scene
-from repo2video.scenes import DEFAULT_ACCENT, FOOTER_CSS, footer_html, theme_css
+from GRC.anim import wrap_page
+from GRC.errors import SceneError
+from GRC.media import MediaAsset
+from GRC.models import Scene
+from GRC.scenes import DEFAULT_ACCENT, FOOTER_CSS, footer_html, theme_css
 
 if TYPE_CHECKING:
-    from repo2video.config import Settings
+    from GRC.config import Settings
 
 logger = logging.getLogger(__name__)
 

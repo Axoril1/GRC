@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PIL import Image
 
-from repo2video.anim import (
+from GRC.anim import (
     BASE_CSS,
     RUNTIME_JS,
     AnimationRenderer,
@@ -21,8 +21,8 @@ from repo2video.anim import (
     make_selftest_html,
     wrap_page,
 )
-from repo2video.config import Settings
-from repo2video.errors import RenderError, SceneError
+from GRC.config import Settings
+from GRC.errors import RenderError, SceneError
 
 
 def is_chromium_available() -> bool:

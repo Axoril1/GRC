@@ -17,9 +17,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from repo2video.config import Settings, get_settings
-from repo2video.errors import Repo2VideoError, VoiceError
-from repo2video.models import ScriptData
+from GRC.config import Settings, get_settings
+from GRC.errors import Repo2VideoError, VoiceError
+from GRC.models import ScriptData
 
 logger = logging.getLogger(__name__)
 
@@ -553,7 +553,7 @@ def synthesize_all(
 def main() -> None:
     """CLI entrypoint for checking voice readiness or synthesizing a script."""
     parser = argparse.ArgumentParser(
-        description="repo2video voice stage: synthesize narration WAV audio using Piper TTS."
+        description="GRC voice stage: synthesize narration WAV audio using Piper TTS."
     )
     parser.add_argument(
         "--check",

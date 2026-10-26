@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from repo2video.errors import ConfigError
+from GRC.errors import ConfigError
 
 
 def load_dotenv(dotenv_path: Path | None = None) -> None:

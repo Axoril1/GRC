@@ -2,7 +2,7 @@
 
 import pytest
 
-from repo2video.errors import (
+from GRC.errors import (
     AnalyzerError,
     ConfigError,
     LLMError,

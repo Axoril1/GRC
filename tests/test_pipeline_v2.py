@@ -11,9 +11,9 @@ from typing import Any
 import pytest
 from PIL import Image
 
-from repo2video.config import Settings
-from repo2video.errors import SceneError
-from repo2video.models import (
+from GRC.config import Settings
+from GRC.errors import SceneError
+from GRC.models import (
     ArchitectureSpec,
     EdgeSpec,
     KeyFile,
@@ -25,9 +25,9 @@ from repo2video.models import (
     ScriptData,
     TerminalSession,
 )
-from repo2video.pipeline import PipelineOptions, run
-from repo2video.render import SceneAssets, SceneVisual, compute_timeline, probe_video
-from repo2video.voice import SceneAudio
+from GRC.pipeline import PipelineOptions, run
+from GRC.render import SceneAssets, SceneVisual, compute_timeline, probe_video
+from GRC.voice import SceneAudio
 
 HAS_FFMPEG = bool(shutil.which("ffmpeg")) and bool(shutil.which("ffprobe"))
 
@@ -255,27 +255,27 @@ def test_stage_order_and_six_stage_progress(
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: FakeClient())
-    monkeypatch.setattr("repo2video.pipeline.PiperEngine", FakePiper)
-    monkeypatch.setattr("repo2video.pipeline.check_ffmpeg", lambda: "ffmpeg 6.1")
-    monkeypatch.setattr("repo2video.pipeline.check_chromium", lambda: "/fake/chrome")
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: FakeClient())
+    monkeypatch.setattr("GRC.pipeline.PiperEngine", FakePiper)
+    monkeypatch.setattr("GRC.pipeline.check_ffmpeg", lambda: "ffmpeg 6.1")
+    monkeypatch.setattr("GRC.pipeline.check_chromium", lambda: "/fake/chrome")
 
     monkeypatch.setattr(
-        "repo2video.pipeline.analyze",
+        "GRC.pipeline.analyze",
         lambda url, settings: calls.append("analyze") or v2_repo_data,
     )
     monkeypatch.setattr(
-        "repo2video.pipeline.collect_media",
+        "GRC.pipeline.collect_media",
         lambda repo, work_dir, settings, force=False: calls.append("media") or v2_media_assets,
     )
     monkeypatch.setattr(
-        "repo2video.pipeline.write_script",
+        "GRC.pipeline.write_script",
         lambda repo, client, settings, media_assets=None: (
             calls.append("script") or v2_all_10_scenes_script
         ),
     )
     monkeypatch.setattr(
-        "repo2video.pipeline.synthesize_all",
+        "GRC.pipeline.synthesize_all",
         lambda script, out_dir, settings: (
             calls.append("voice")
             or [
@@ -291,7 +291,7 @@ def test_stage_order_and_six_stage_progress(
         vis = [SceneVisual(kind="image", image=tmp_path / f"s_{s.id}.png") for s in script.scenes]
         return vis, [], "Visuals from README"
 
-    monkeypatch.setattr("repo2video.pipeline._render_visuals", fake_render_visuals)
+    monkeypatch.setattr("GRC.pipeline._render_visuals", fake_render_visuals)
 
     def fake_render_video(*args: Any, **kwargs: Any) -> None:
         calls.append("render")
@@ -299,9 +299,9 @@ def test_stage_order_and_six_stage_progress(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(b"MP4_DATA")
 
-    monkeypatch.setattr("repo2video.pipeline.render_video", fake_render_video)
+    monkeypatch.setattr("GRC.pipeline.render_video", fake_render_video)
     monkeypatch.setattr(
-        "repo2video.pipeline.probe_video",
+        "GRC.pipeline.probe_video",
         lambda p: {"duration_seconds": 22.0, "width": 1920, "height": 1080},
     )
 
@@ -342,17 +342,17 @@ def test_media_stage_failure_gives_empty_list_and_continues(
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: FakeClient())
-    monkeypatch.setattr("repo2video.pipeline.PiperEngine", FakePiper)
-    monkeypatch.setattr("repo2video.pipeline.check_ffmpeg", lambda: "ffmpeg")
-    monkeypatch.setattr("repo2video.pipeline.check_chromium", lambda: "/chrome")
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: FakeClient())
+    monkeypatch.setattr("GRC.pipeline.PiperEngine", FakePiper)
+    monkeypatch.setattr("GRC.pipeline.check_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("GRC.pipeline.check_chromium", lambda: "/chrome")
 
-    monkeypatch.setattr("repo2video.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
 
     def broken_collect_media(*args: Any, **kwargs: Any) -> list[MediaAsset]:
         raise RuntimeError("Network down or download blocked")
 
-    monkeypatch.setattr("repo2video.pipeline.collect_media", broken_collect_media)
+    monkeypatch.setattr("GRC.pipeline.collect_media", broken_collect_media)
 
     media_received: list[Any] = []
 
@@ -362,7 +362,7 @@ def test_media_stage_failure_gives_empty_list_and_continues(
         media_received.extend(media_assets or [])
         return v2_all_10_scenes_script
 
-    monkeypatch.setattr("repo2video.pipeline.write_script", mock_write_script)
+    monkeypatch.setattr("GRC.pipeline.write_script", mock_write_script)
 
     # Run script only to inspect media stage handling
     options = PipelineOptions(script_only=True)
@@ -386,15 +386,15 @@ def test_no_media_flag_skips_media_stage(
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: FakeClient())
-    monkeypatch.setattr("repo2video.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: FakeClient())
+    monkeypatch.setattr("GRC.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
 
     def never_call_collect(*args: Any, **kwargs: Any) -> list[MediaAsset]:
         raise AssertionError("collect_media must not be called when --no-media is passed")
 
-    monkeypatch.setattr("repo2video.pipeline.collect_media", never_call_collect)
+    monkeypatch.setattr("GRC.pipeline.collect_media", never_call_collect)
     monkeypatch.setattr(
-        "repo2video.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
+        "GRC.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
     )
 
     options = PipelineOptions(script_only=True, no_media=True)
@@ -415,9 +415,9 @@ def test_resolve_references_on_reused_scenes_json_degrades_invalid_scenes(
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: FakeClient())
-    monkeypatch.setattr("repo2video.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
-    monkeypatch.setattr("repo2video.pipeline.collect_media", lambda r, w, s, force=False: [])
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: FakeClient())
+    monkeypatch.setattr("GRC.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.collect_media", lambda r, w, s, force=False: [])
 
     # Pre-populate reused scenes.json pointing to non-existent code file 'f_missing'
     work_dir = settings.output_dir / "test-owner__full-v2-repo"
@@ -460,20 +460,18 @@ def test_builder_exception_triggers_fallback_and_records_in_run_json(
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: FakeClient())
-    monkeypatch.setattr("repo2video.pipeline.PiperEngine", FakePiper)
-    monkeypatch.setattr("repo2video.pipeline.check_ffmpeg", lambda: "ffmpeg")
-    monkeypatch.setattr("repo2video.pipeline.check_chromium", lambda: "/chrome")
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: FakeClient())
+    monkeypatch.setattr("GRC.pipeline.PiperEngine", FakePiper)
+    monkeypatch.setattr("GRC.pipeline.check_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("GRC.pipeline.check_chromium", lambda: "/chrome")
 
-    monkeypatch.setattr("repo2video.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets)
     monkeypatch.setattr(
-        "repo2video.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets
+        "GRC.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
     )
     monkeypatch.setattr(
-        "repo2video.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
-    )
-    monkeypatch.setattr(
-        "repo2video.pipeline.synthesize_all",
+        "GRC.pipeline.synthesize_all",
         lambda sc, out_dir, *args, **kwargs: [
             SceneAudio(scene_id=scene.id, path=tmp_path / f"{scene.id}.wav", duration_seconds=1.5)
             for scene in sc.scenes
@@ -484,7 +482,7 @@ def test_builder_exception_triggers_fallback_and_records_in_run_json(
     def broken_terminal(*args: Any, **kwargs: Any) -> str:
         raise SceneError("Terminal session formatting failed.")
 
-    monkeypatch.setattr("repo2video.pipeline.build_terminal_html", broken_terminal)
+    monkeypatch.setattr("GRC.pipeline.build_terminal_html", broken_terminal)
 
     # Mock screenshot_html so fallback static slide generation succeeds
     def mock_screenshot(html_str: str, out_p: Path, *args: Any, **kwargs: Any) -> Path:
@@ -492,7 +490,7 @@ def test_builder_exception_triggers_fallback_and_records_in_run_json(
         out_p.write_bytes(b"STATIC_SLIDE_PNG")
         return out_p
 
-    monkeypatch.setattr("repo2video.pipeline.screenshot_html", mock_screenshot)
+    monkeypatch.setattr("GRC.pipeline.screenshot_html", mock_screenshot)
 
     # Mock AnimationRenderer.render
     class FakeRenderer:
@@ -512,16 +510,16 @@ def test_builder_exception_triggers_fallback_and_records_in_run_json(
             out_path.write_bytes(b"CLIP_DATA")
             return out_path
 
-    monkeypatch.setattr("repo2video.pipeline.AnimationRenderer", FakeRenderer)
+    monkeypatch.setattr("GRC.pipeline.AnimationRenderer", FakeRenderer)
 
     def mock_render_video(*args: Any, **kwargs: Any) -> None:
         out_path = args[1]
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(b"VIDEO_DATA")
 
-    monkeypatch.setattr("repo2video.pipeline.render_video", mock_render_video)
+    monkeypatch.setattr("GRC.pipeline.render_video", mock_render_video)
     monkeypatch.setattr(
-        "repo2video.pipeline.probe_video",
+        "GRC.pipeline.probe_video",
         lambda p: {"duration_seconds": 15.0, "width": 1920, "height": 1080},
     )
 
@@ -558,20 +556,18 @@ def test_failing_fallback_aborts_with_scene_error(
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: FakeClient())
-    monkeypatch.setattr("repo2video.pipeline.PiperEngine", FakePiper)
-    monkeypatch.setattr("repo2video.pipeline.check_ffmpeg", lambda: "ffmpeg")
-    monkeypatch.setattr("repo2video.pipeline.check_chromium", lambda: "/chrome")
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: FakeClient())
+    monkeypatch.setattr("GRC.pipeline.PiperEngine", FakePiper)
+    monkeypatch.setattr("GRC.pipeline.check_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("GRC.pipeline.check_chromium", lambda: "/chrome")
 
-    monkeypatch.setattr("repo2video.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets)
     monkeypatch.setattr(
-        "repo2video.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets
+        "GRC.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
     )
     monkeypatch.setattr(
-        "repo2video.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
-    )
-    monkeypatch.setattr(
-        "repo2video.pipeline.synthesize_all",
+        "GRC.pipeline.synthesize_all",
         lambda sc, out_dir, *args, **kwargs: [
             SceneAudio(scene_id=scene.id, path=tmp_path / f"{scene.id}.wav", duration_seconds=1.5)
             for scene in sc.scenes
@@ -580,7 +576,7 @@ def test_failing_fallback_aborts_with_scene_error(
 
     # Builder fails
     monkeypatch.setattr(
-        "repo2video.pipeline.build_code_html",
+        "GRC.pipeline.build_code_html",
         lambda *args, **kwargs: (_ for _ in ()).throw(SceneError("Code failed")),
     )
 
@@ -594,7 +590,7 @@ def test_failing_fallback_aborts_with_scene_error(
         out_p.write_bytes(b"STATIC_PNG")
         return out_p
 
-    monkeypatch.setattr("repo2video.pipeline.screenshot_html", failing_screenshot_for_scene_5)
+    monkeypatch.setattr("GRC.pipeline.screenshot_html", failing_screenshot_for_scene_5)
 
     class FakeRenderer:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -606,7 +602,7 @@ def test_failing_fallback_aborts_with_scene_error(
         def __exit__(self, *args: object) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.AnimationRenderer", FakeRenderer)
+    monkeypatch.setattr("GRC.pipeline.AnimationRenderer", FakeRenderer)
 
     with pytest.raises(SceneError, match="Static fallback slide failed for scene 5"):
         run("https://github.com/test-owner/full-v2-repo", settings=settings)
@@ -633,20 +629,18 @@ def test_no_animation_uses_capture_frame_and_creates_image_visuals(
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: FakeClient())
-    monkeypatch.setattr("repo2video.pipeline.PiperEngine", FakePiper)
-    monkeypatch.setattr("repo2video.pipeline.check_ffmpeg", lambda: "ffmpeg")
-    monkeypatch.setattr("repo2video.pipeline.check_chromium", lambda: "/chrome")
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: FakeClient())
+    monkeypatch.setattr("GRC.pipeline.PiperEngine", FakePiper)
+    monkeypatch.setattr("GRC.pipeline.check_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("GRC.pipeline.check_chromium", lambda: "/chrome")
 
-    monkeypatch.setattr("repo2video.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets)
     monkeypatch.setattr(
-        "repo2video.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets
+        "GRC.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
     )
     monkeypatch.setattr(
-        "repo2video.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
-    )
-    monkeypatch.setattr(
-        "repo2video.pipeline.synthesize_all",
+        "GRC.pipeline.synthesize_all",
         lambda sc, out_dir, *args, **kwargs: [
             SceneAudio(scene_id=scene.id, path=tmp_path / f"{scene.id}.wav", duration_seconds=2.0)
             for scene in sc.scenes
@@ -672,9 +666,9 @@ def test_no_animation_uses_capture_frame_and_creates_image_visuals(
         def render(self, *args: Any, **kwargs: Any) -> Path:
             raise AssertionError("render() must not be called when no_animation=True")
 
-    monkeypatch.setattr("repo2video.pipeline.AnimationRenderer", FakeRenderer)
+    monkeypatch.setattr("GRC.pipeline.AnimationRenderer", FakeRenderer)
     monkeypatch.setattr(
-        "repo2video.pipeline.screenshot_html",
+        "GRC.pipeline.screenshot_html",
         lambda h, p, settings=None, **kwargs: p.write_bytes(b"STATIC_PNG") or p,
     )
 
@@ -688,9 +682,9 @@ def test_no_animation_uses_capture_frame_and_creates_image_visuals(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(b"VID")
 
-    monkeypatch.setattr("repo2video.pipeline.render_video", inspect_render_video)
+    monkeypatch.setattr("GRC.pipeline.render_video", inspect_render_video)
     monkeypatch.setattr(
-        "repo2video.pipeline.probe_video",
+        "GRC.pipeline.probe_video",
         lambda p: {"duration_seconds": 20.0, "width": 1920, "height": 1080},
     )
 
@@ -725,20 +719,18 @@ def test_credit_line_placement_rules(
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: FakeClient())
-    monkeypatch.setattr("repo2video.pipeline.PiperEngine", FakePiper)
-    monkeypatch.setattr("repo2video.pipeline.check_ffmpeg", lambda: "ffmpeg")
-    monkeypatch.setattr("repo2video.pipeline.check_chromium", lambda: "/chrome")
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: FakeClient())
+    monkeypatch.setattr("GRC.pipeline.PiperEngine", FakePiper)
+    monkeypatch.setattr("GRC.pipeline.check_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("GRC.pipeline.check_chromium", lambda: "/chrome")
 
-    monkeypatch.setattr("repo2video.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets)
     monkeypatch.setattr(
-        "repo2video.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets
+        "GRC.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
     )
     monkeypatch.setattr(
-        "repo2video.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
-    )
-    monkeypatch.setattr(
-        "repo2video.pipeline.synthesize_all",
+        "GRC.pipeline.synthesize_all",
         lambda sc, out_dir, *args, **kwargs: [
             SceneAudio(scene_id=scene.id, path=tmp_path / f"{scene.id}.wav", duration_seconds=1.5)
             for scene in sc.scenes
@@ -750,7 +742,7 @@ def test_credit_line_placement_rules(
         out_p.write_bytes(b"STATIC_SLIDE_PNG")
         return out_p
 
-    monkeypatch.setattr("repo2video.pipeline.screenshot_html", mock_screenshot)
+    monkeypatch.setattr("GRC.pipeline.screenshot_html", mock_screenshot)
 
     class FakeRenderer:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -769,16 +761,16 @@ def test_credit_line_placement_rules(
             out_path.write_bytes(b"CLIP_DATA")
             return out_path
 
-    monkeypatch.setattr("repo2video.pipeline.AnimationRenderer", FakeRenderer)
+    monkeypatch.setattr("GRC.pipeline.AnimationRenderer", FakeRenderer)
 
     def mock_render_video(*args: Any, **kwargs: Any) -> None:
         out_path = args[1]
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(b"VIDEO_DATA")
 
-    monkeypatch.setattr("repo2video.pipeline.render_video", mock_render_video)
+    monkeypatch.setattr("GRC.pipeline.render_video", mock_render_video)
     monkeypatch.setattr(
-        "repo2video.pipeline.probe_video",
+        "GRC.pipeline.probe_video",
         lambda p: {"duration_seconds": 15.0, "width": 1920, "height": 1080},
     )
 
@@ -832,20 +824,18 @@ def test_e2e_all_10_scene_types_real_tools(
         for s in v2_all_10_scenes_script.scenes
     ]
 
-    monkeypatch.setattr("repo2video.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets)
     monkeypatch.setattr(
-        "repo2video.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets
+        "GRC.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
     )
-    monkeypatch.setattr(
-        "repo2video.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
-    )
-    monkeypatch.setattr("repo2video.pipeline.synthesize_all", lambda *args, **kwargs: real_audios)
+    monkeypatch.setattr("GRC.pipeline.synthesize_all", lambda *args, **kwargs: real_audios)
 
     class ReadyClient:
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: ReadyClient())
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: ReadyClient())
 
     options = PipelineOptions(fast=True, captions="srt")
     res = run("https://github.com/test-owner/full-v2-repo", settings=settings, options=options)
@@ -899,26 +889,24 @@ def test_e2e_one_builder_raises_falls_back_and_renders(
         for s in v2_all_10_scenes_script.scenes
     ]
 
-    monkeypatch.setattr("repo2video.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.analyze", lambda *args, **kwargs: v2_repo_data)
+    monkeypatch.setattr("GRC.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets)
     monkeypatch.setattr(
-        "repo2video.pipeline.collect_media", lambda r, w, s, force=False: v2_media_assets
+        "GRC.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
     )
-    monkeypatch.setattr(
-        "repo2video.pipeline.write_script", lambda *args, **kwargs: v2_all_10_scenes_script
-    )
-    monkeypatch.setattr("repo2video.pipeline.synthesize_all", lambda *args, **kwargs: real_audios)
+    monkeypatch.setattr("GRC.pipeline.synthesize_all", lambda *args, **kwargs: real_audios)
 
     class ReadyClient:
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: ReadyClient())
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: ReadyClient())
 
     # Make build_stats_html fail intentionally
     def failing_stats(*args: Any, **kwargs: Any) -> str:
         raise SceneError("Intentional stats failure for fallback verification.")
 
-    monkeypatch.setattr("repo2video.pipeline.build_stats_html", failing_stats)
+    monkeypatch.setattr("GRC.pipeline.build_stats_html", failing_stats)
 
     options = PipelineOptions(fast=True, captions="srt")
     res = run("https://github.com/test-owner/full-v2-repo", settings=settings, options=options)

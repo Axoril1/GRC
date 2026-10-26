@@ -8,15 +8,15 @@ from typing import Any
 
 import pytest
 
-from repo2video.config import Settings
-from repo2video.errors import (
+from GRC.config import Settings
+from GRC.errors import (
     LLMError,
     RenderError,
     Repo2VideoError,
     VoiceError,
 )
-from repo2video.models import RepoData, Scene, ScriptData
-from repo2video.pipeline import (
+from GRC.models import RepoData, Scene, ScriptData
+from GRC.pipeline import (
     DoctorCheck,
     PipelineOptions,
     PipelineResult,
@@ -27,8 +27,8 @@ from repo2video.pipeline import (
     render_only,
     run,
 )
-from repo2video.render import SceneAssets, SceneVisual
-from repo2video.voice import SceneAudio
+from GRC.render import SceneAssets, SceneVisual
+from GRC.voice import SceneAudio
 
 
 @pytest.fixture
@@ -129,13 +129,13 @@ def mock_pipeline_environment(
         def check_ready(self) -> None:
             calls.append("piper_check_ready")
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: FakeLLMClient())
-    monkeypatch.setattr("repo2video.pipeline.PiperEngine", FakePiperEngine)
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: FakeLLMClient())
+    monkeypatch.setattr("GRC.pipeline.PiperEngine", FakePiperEngine)
     monkeypatch.setattr(
-        "repo2video.pipeline.check_ffmpeg", lambda: calls.append("check_ffmpeg") or "ffmpeg 6.1"
+        "GRC.pipeline.check_ffmpeg", lambda: calls.append("check_ffmpeg") or "ffmpeg 6.1"
     )
     monkeypatch.setattr(
-        "repo2video.pipeline.check_chromium",
+        "GRC.pipeline.check_chromium",
         lambda: calls.append("check_chromium") or "/fake/chromium",
     )
 
@@ -169,7 +169,7 @@ def mock_pipeline_environment(
         render_options: Any,
         on_scene: Any = None,
     ) -> tuple[list[SceneVisual], list[dict[str, Any]], str | None]:
-        from repo2video.render import SceneVisual
+        from GRC.render import SceneVisual
 
         calls.append("visuals")
         (work_dir / "slides").mkdir(parents=True, exist_ok=True)
@@ -232,14 +232,14 @@ def mock_pipeline_environment(
             "size_bytes": 1024,
         }
 
-    monkeypatch.setattr("repo2video.pipeline.analyze", fake_analyze)
-    monkeypatch.setattr("repo2video.pipeline.collect_media", fake_collect_media)
-    monkeypatch.setattr("repo2video.pipeline.write_script", fake_write_script)
-    monkeypatch.setattr("repo2video.pipeline.render_scenes", fake_render_scenes)
-    monkeypatch.setattr("repo2video.pipeline._render_visuals", fake_render_visuals)
-    monkeypatch.setattr("repo2video.pipeline.synthesize_all", fake_synthesize_all)
-    monkeypatch.setattr("repo2video.pipeline.render_video", fake_render_video)
-    monkeypatch.setattr("repo2video.pipeline.probe_video", fake_probe_video)
+    monkeypatch.setattr("GRC.pipeline.analyze", fake_analyze)
+    monkeypatch.setattr("GRC.pipeline.collect_media", fake_collect_media)
+    monkeypatch.setattr("GRC.pipeline.write_script", fake_write_script)
+    monkeypatch.setattr("GRC.pipeline.render_scenes", fake_render_scenes)
+    monkeypatch.setattr("GRC.pipeline._render_visuals", fake_render_visuals)
+    monkeypatch.setattr("GRC.pipeline.synthesize_all", fake_synthesize_all)
+    monkeypatch.setattr("GRC.pipeline.render_video", fake_render_video)
+    monkeypatch.setattr("GRC.pipeline.probe_video", fake_probe_video)
 
     return {
         "calls": calls,
@@ -434,9 +434,9 @@ def test_preflight_reports_all_failures_together(
     def broken_ffmpeg() -> str:
         raise RenderError("FFmpeg binary missing from PATH.", hint="Install FFmpeg")
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: BrokenLLMClient())
-    monkeypatch.setattr("repo2video.pipeline.PiperEngine", BrokenPiperEngine)
-    monkeypatch.setattr("repo2video.pipeline.check_ffmpeg", broken_ffmpeg)
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: BrokenLLMClient())
+    monkeypatch.setattr("GRC.pipeline.PiperEngine", BrokenPiperEngine)
+    monkeypatch.setattr("GRC.pipeline.check_ffmpeg", broken_ffmpeg)
 
     with pytest.raises(Repo2VideoError) as exc_info:
         _run_preflight(settings, script_only=False)
@@ -587,10 +587,10 @@ def test_check_doctor_all_ok(
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: ReadyLLM())
-    monkeypatch.setattr("repo2video.pipeline.PiperEngine", ReadyPiper)
-    monkeypatch.setattr("repo2video.pipeline.check_ffmpeg", lambda: "ffmpeg 6.1")
-    monkeypatch.setattr("repo2video.pipeline.check_chromium", lambda: "/path/to/chrome")
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: ReadyLLM())
+    monkeypatch.setattr("GRC.pipeline.PiperEngine", ReadyPiper)
+    monkeypatch.setattr("GRC.pipeline.check_ffmpeg", lambda: "ffmpeg 6.1")
+    monkeypatch.setattr("GRC.pipeline.check_chromium", lambda: "/path/to/chrome")
 
     checks: list[DoctorCheck] = check_doctor(settings)
     assert len(checks) == 10
@@ -621,10 +621,10 @@ def test_check_doctor_mixed_failures(
         def check_ready(self) -> None:
             pass
 
-    monkeypatch.setattr("repo2video.pipeline.get_client", lambda s: FailingLLM())
-    monkeypatch.setattr("repo2video.pipeline.PiperEngine", ReadyPiper)
-    monkeypatch.setattr("repo2video.pipeline.check_ffmpeg", lambda: "ffmpeg 6.1")
-    monkeypatch.setattr("repo2video.pipeline.check_chromium", lambda: "/path/to/chrome")
+    monkeypatch.setattr("GRC.pipeline.get_client", lambda s: FailingLLM())
+    monkeypatch.setattr("GRC.pipeline.PiperEngine", ReadyPiper)
+    monkeypatch.setattr("GRC.pipeline.check_ffmpeg", lambda: "ffmpeg 6.1")
+    monkeypatch.setattr("GRC.pipeline.check_chromium", lambda: "/path/to/chrome")
 
     checks = check_doctor(settings)
     llm_check = next(c for c in checks if "LLM" in c.name)

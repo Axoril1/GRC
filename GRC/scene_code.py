@@ -11,10 +11,10 @@ from pygments.lexers import TextLexer, get_lexer_by_name, guess_lexer_for_filena
 from pygments.styles import get_style_by_name
 from pygments.util import ClassNotFound
 
-from repo2video.anim import wrap_page
-from repo2video.errors import SceneError
-from repo2video.models import FocusRange, KeyFile, Scene
-from repo2video.scenes import (
+from GRC.anim import wrap_page
+from GRC.errors import SceneError
+from GRC.models import FocusRange, KeyFile, Scene
+from GRC.scenes import (
     DEFAULT_ACCENT,
     FOOTER_CSS,
     _hex_to_rgba,
@@ -24,7 +24,7 @@ from repo2video.scenes import (
 )
 
 if TYPE_CHECKING:
-    from repo2video.config import Settings
+    from GRC.config import Settings
 
 logger = logging.getLogger(__name__)
 

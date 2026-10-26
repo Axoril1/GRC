@@ -28,8 +28,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Self
 
-from repo2video.config import Settings, get_settings
-from repo2video.errors import RenderError, SceneError
+from GRC.config import Settings, get_settings
+from GRC.errors import RenderError, SceneError
 
 logger = logging.getLogger(__name__)
 
@@ -657,7 +657,7 @@ def main() -> None:
         elapsed = time.monotonic() - t0
         print(f"Selftest completed: {out_path} rendered in {elapsed:.2f}s")
     else:
-        print("Usage: python -m repo2video.anim --selftest")
+        print("Usage: python -m GRC.anim --selftest")
         sys.exit(1)
 
 

@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from repo2video.errors import RenderError
+from GRC.errors import RenderError
 
 if TYPE_CHECKING:
-    from repo2video.config import Settings
+    from GRC.config import Settings
 
 logger = logging.getLogger(__name__)
 

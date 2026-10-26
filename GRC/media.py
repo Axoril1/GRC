@@ -22,8 +22,8 @@ from urllib.parse import urljoin, urlsplit
 import requests
 from PIL import Image, ImageStat
 
-from repo2video.config import Settings, get_settings
-from repo2video.models import MediaAsset, MediaRef, RepoData
+from GRC.config import Settings, get_settings
+from GRC.models import MediaAsset, MediaRef, RepoData
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ __all__ = [
 ]
 
 # Network and limits
-USER_AGENT = "repo2video/0.2"
+USER_AGENT = "GRC/0.2"
 DOWNLOAD_TIMEOUT_SECONDS = 20
 MAX_REDIRECTS = 3
 
@@ -1020,7 +1020,7 @@ def credit_line(assets: list[MediaAsset], repo_label: str) -> str:
 def main() -> None:
     """CLI entry point for testing media collection on a saved repo.json."""
     if len(sys.argv) < 3:
-        sys.stderr.write("Usage: python -m repo2video.media <repo.json> <work_dir>\n")
+        sys.stderr.write("Usage: python -m GRC.media <repo.json> <work_dir>\n")
         sys.exit(1)
 
     repo_file = Path(sys.argv[1])

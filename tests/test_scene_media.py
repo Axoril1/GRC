@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from repo2video.anim import AnimationRenderer
-from repo2video.config import Settings
-from repo2video.media import MediaAsset
-from repo2video.models import Scene
-from repo2video.scene_media import (
+from GRC.anim import AnimationRenderer
+from GRC.config import Settings
+from GRC.media import MediaAsset
+from GRC.models import Scene
+from GRC.scene_media import (
     Rect,
     build_clip_frame_html,
     build_media_html,

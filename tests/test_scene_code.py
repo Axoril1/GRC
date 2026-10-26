@@ -7,9 +7,9 @@ import io
 import pytest
 from PIL import Image
 
-from repo2video.anim import AnimationRenderer
-from repo2video.models import FocusRange, KeyFile, Scene
-from repo2video.scene_code import (
+from GRC.anim import AnimationRenderer
+from GRC.models import FocusRange, KeyFile, Scene
+from GRC.scene_code import (
     build_code_html,
     format_file_title,
     highlight_code_to_lines,

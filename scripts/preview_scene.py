@@ -7,10 +7,10 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from repo2video.anim import AnimationRenderer
-from repo2video.config import get_settings
-from repo2video.media import MediaAsset
-from repo2video.models import (
+from GRC.anim import AnimationRenderer
+from GRC.config import get_settings
+from GRC.media import MediaAsset
+from GRC.models import (
     ArchitectureSpec,
     EdgeSpec,
     FocusRange,
@@ -20,11 +20,11 @@ from repo2video.models import (
     Scene,
     TerminalSession,
 )
-from repo2video.scene_arch import build_arch_html
-from repo2video.scene_code import build_code_html
-from repo2video.scene_media import build_media_html
-from repo2video.scene_stats import build_stats_html
-from repo2video.scene_terminal import build_terminal_html
+from GRC.scene_arch import build_arch_html
+from GRC.scene_code import build_code_html
+from GRC.scene_media import build_media_html
+from GRC.scene_stats import build_stats_html
+from GRC.scene_terminal import build_terminal_html
 
 
 def make_dummy_media_image(path: Path) -> Path:

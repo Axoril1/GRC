@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from repo2video.captions import Cue
-from repo2video.config import Settings
-from repo2video.errors import RenderError
-from repo2video.render import (
+from GRC.captions import Cue
+from GRC.config import Settings
+from GRC.errors import RenderError
+from GRC.render import (
     Capabilities,
     RenderOptions,
     SceneAssets,
@@ -27,7 +27,7 @@ from repo2video.render import (
     render_video,
     scene_video_lengths,
 )
-from repo2video.scene_media import Rect
+from GRC.scene_media import Rect
 
 HAS_FFMPEG = bool(shutil.which("ffmpeg")) and bool(shutil.which("ffprobe"))
 skip_if_no_ffmpeg = pytest.mark.skipif(
@@ -267,7 +267,7 @@ def test_missing_capabilities_degrade_transitions(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Verify lack of xfade capability logs warning and degrades to transitions off."""
-    import repo2video.render as r_mod
+    import GRC.render as r_mod
 
     fake_cap = Capabilities(
         version="ffmpeg version 6.0",

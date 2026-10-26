@@ -8,9 +8,9 @@ import itertools
 import pytest
 from PIL import Image
 
-from repo2video.anim import AnimationRenderer
-from repo2video.models import ArchitectureSpec, EdgeSpec, NodeSpec, Scene
-from repo2video.scene_arch import (
+from GRC.anim import AnimationRenderer
+from GRC.models import ArchitectureSpec, EdgeSpec, NodeSpec, Scene
+from GRC.scene_arch import (
     NodeBox,
     build_arch_html,
     layout_graph,

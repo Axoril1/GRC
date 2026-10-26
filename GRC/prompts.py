@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from repo2video.models import RepoData
+    from GRC.models import RepoData
 
 SYSTEM_PROMPT = """You are a technical video scriptwriter. You turn a summary of a GitHub repository into the script of a short demo video for developers and recruiters. The video should feel like a demo, not a slideshow, so choose visual scene types that fit the material you are given.
 

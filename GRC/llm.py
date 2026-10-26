@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import requests
 
-from repo2video.config import get_settings
-from repo2video.errors import ConfigError, LLMError, Repo2VideoError
+from GRC.config import get_settings
+from GRC.errors import ConfigError, LLMError, Repo2VideoError
 
 if TYPE_CHECKING:
-    from repo2video.config import Settings
+    from GRC.config import Settings
 
 logger = logging.getLogger(__name__)
 

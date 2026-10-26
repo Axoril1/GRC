@@ -21,10 +21,12 @@ def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     root_logger.setLevel(level)
 
-    # Search for an existing handler managed by repo2video
+    # Search for an existing handler managed by GRC
     existing_handler: logging.Handler | None = None
     for handler in root_logger.handlers:
-        if getattr(handler, "_repo2video_handler", False):
+        if getattr(handler, "_grc_handler", False) or getattr(
+            handler, "_repo2video_handler", False
+        ):
             existing_handler = handler
             break
 
@@ -32,6 +34,7 @@ def setup_logging(verbose: bool = False) -> None:
         existing_handler.setLevel(level)
     else:
         new_handler = logging.StreamHandler()
+        new_handler._grc_handler = True  # type: ignore[attr-defined]
         new_handler._repo2video_handler = True  # type: ignore[attr-defined]
         formatter = logging.Formatter("%(levelname)s %(name)s: %(message)s")
         new_handler.setFormatter(formatter)
