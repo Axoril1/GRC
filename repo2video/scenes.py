@@ -65,6 +65,109 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
         return f"rgba(99, 102, 241, {alpha:.2f})"
 
 
+FOOTER_CSS: str = """/* Footer */
+.slide-footer {
+  width: 100%;
+  height: 48px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 28px;
+  color: var(--muted);
+}
+
+.footer-label {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.progress-track {
+  width: 220px;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+}
+
+.page-counter {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}"""
+
+
+def theme_css(theme: str = "dark", accent: str = DEFAULT_ACCENT) -> str:
+    """Generate CSS root variables defining the color theme.
+
+    Args:
+        theme: Color theme name ('dark' or 'light').
+        accent: Hex color code for accent highlights.
+
+    Returns:
+        CSS root block defining color variables.
+    """
+    valid_accent = _validate_accent(accent)
+    accent_soft = _hex_to_rgba(valid_accent, 0.12)
+    is_light = theme.lower().strip() == "light"
+    if is_light:
+        bg_color = "#f7f8fc"
+        surface_color = "#ffffff"
+        text_color = "#121528"
+        muted_color = "#5b6382"
+        border_color = "rgba(0, 0, 0, 0.08)"
+    else:
+        bg_color = "#0b1020"
+        surface_color = "#151b30"
+        text_color = "#f4f6fb"
+        muted_color = "#9aa3bd"
+        border_color = "rgba(255, 255, 255, 0.08)"
+
+    return f""":root {{
+  --bg: {bg_color};
+  --surface: {surface_color};
+  --text: {text_color};
+  --muted: {muted_color};
+  --accent: {valid_accent};
+  --accent-soft: {accent_soft};
+  --border: {border_color};
+}}"""
+
+
+def footer_html(repo_label: str, index: int, total: int) -> str:
+    """Generate the slide footer HTML component with repo label and progress bar.
+
+    Args:
+        repo_label: Human-readable repository identifier (e.g. 'owner/repo').
+        index: Current 1-based scene index.
+        total: Total number of scenes in the script.
+
+    Returns:
+        HTML string for the slide footer.
+    """
+    escaped_label = html.escape(repo_label)
+    progress_pct = max(0.0, min(100.0, (index / total * 100.0) if total > 0 else 100.0))
+    return f"""  <div class="slide-footer">
+    <div class="footer-label">{escaped_label}</div>
+    <div class="footer-right">
+      <div class="progress-track">
+        <div class="progress-fill" style="width: {progress_pct}%;"></div>
+      </div>
+      <span class="page-counter">{index} / {total}</span>
+    </div>
+  </div>"""
+
+
 def build_html(
     scene: Scene,
     index: int,
@@ -91,29 +194,12 @@ def build_html(
         Complete HTML markup string.
     """
     valid_accent = _validate_accent(accent)
-    accent_soft = _hex_to_rgba(valid_accent, 0.12)
-
-    is_light = theme.lower().strip() == "light"
-    if is_light:
-        bg_color = "#f7f8fc"
-        surface_color = "#ffffff"
-        text_color = "#121528"
-        muted_color = "#5b6382"
-        border_color = "rgba(0, 0, 0, 0.08)"
-    else:
-        bg_color = "#0b1020"
-        surface_color = "#151b30"
-        text_color = "#f4f6fb"
-        muted_color = "#9aa3bd"
-        border_color = "rgba(255, 255, 255, 0.08)"
 
     # Escaped content
     escaped_heading = html.escape(scene.heading)
     escaped_bullets = [html.escape(b) for b in scene.bullets]
     escaped_code = html.escape(scene.code)
     escaped_label = html.escape(repo_label)
-
-    progress_pct = max(0.0, min(100.0, (index / total * 100.0) if total > 0 else 100.0))
 
     # Body layout depending on scene type
     scene_type = scene.type.lower()
@@ -250,15 +336,7 @@ def build_html(
 <head>
 <meta charset="utf-8">
 <style>
-:root {{
-  --bg: {bg_color};
-  --surface: {surface_color};
-  --text: {text_color};
-  --muted: {muted_color};
-  --accent: {valid_accent};
-  --accent-soft: {accent_soft};
-  --border: {border_color};
-}}
+{theme_css(theme, valid_accent)}
 
 * {{
   box-sizing: border-box;
@@ -606,15 +684,7 @@ html, body {{
   <div class="content-box">
     {content_html}
   </div>
-  <div class="slide-footer">
-    <div class="footer-label">{escaped_label}</div>
-    <div class="footer-right">
-      <div class="progress-track">
-        <div class="progress-fill" style="width: {progress_pct}%;"></div>
-      </div>
-      <span class="page-counter">{index} / {total}</span>
-    </div>
-  </div>
+{footer_html(repo_label, index, total)}
 </div>
 
 <script>
