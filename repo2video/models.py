@@ -137,25 +137,31 @@ class BaseRepoModel(BaseModel):
             ) from exc
 
 
-@dataclass
+@dataclass(frozen=True)
 class MediaAsset:
     """Downloaded media asset descriptor.
 
     Attributes:
         id: Identifier matching a MediaRef id or screenshot (e.g. m1, h1).
         kind: Media kind ('image' or 'clip').
-        alt: Alternative description text (may be empty).
-        origin: Source origin ('readme' or 'homepage').
+        path: File path on disk.
         width: Image or video width in pixels.
         height: Image or video height in pixels.
+        duration_seconds: Duration in seconds (0.0 for static images).
+        alt: Alternative description text.
+        origin: Source origin ('readme' or 'homepage').
+        source_url: Source URL where the asset was fetched from.
     """
 
     id: str
-    kind: str = "image"
-    alt: str = ""
-    origin: str = "readme"
+    kind: str
+    path: Path = Path()
     width: int = 0
     height: int = 0
+    duration_seconds: float = 0.0
+    alt: str = ""
+    origin: str = "readme"
+    source_url: str = ""
 
 
 class MediaRef(BaseRepoModel):

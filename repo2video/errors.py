@@ -87,6 +87,15 @@ class VoiceError(Repo2VideoError):
     """
 
 
+class MediaError(Repo2VideoError):
+    """Raised when downloading or processing repository media fails.
+
+    Attributes:
+        message: Explanation of the media failure.
+        hint: Optional short sentence suggesting how to resolve the issue.
+    """
+
+
 class RenderError(Repo2VideoError):
     """Raised when video rendering or composition fails.
 

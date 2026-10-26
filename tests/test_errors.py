@@ -6,6 +6,7 @@ from repo2video.errors import (
     AnalyzerError,
     ConfigError,
     LLMError,
+    MediaError,
     RenderError,
     Repo2VideoError,
     SceneError,
@@ -39,6 +40,7 @@ def test_repo2video_error_with_hint() -> None:
         ScriptError,
         SceneError,
         VoiceError,
+        MediaError,
         RenderError,
     ],
 )

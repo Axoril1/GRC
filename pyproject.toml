@@ -15,6 +15,7 @@ dependencies = [
     "playwright",
     "pydantic>=2",
     "piper-tts",
+    "Pillow",
 ]
 
 [project.optional-dependencies]
