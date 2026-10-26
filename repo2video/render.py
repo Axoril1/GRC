@@ -198,7 +198,7 @@ class Timeline:
 
 # Cached binary capabilities and runner identity
 _CACHED_CAPABILITIES: Capabilities | None = None
-_CACHED_RUNNER_ID: int | None = None
+_CACHED_RUNNER_ID: tuple[int, int] | None = None
 
 
 def capabilities() -> Capabilities:
@@ -211,7 +211,7 @@ def capabilities() -> Capabilities:
         RenderError: If ffmpeg or ffprobe binaries cannot be found on PATH.
     """
     global _CACHED_CAPABILITIES, _CACHED_RUNNER_ID
-    current_runner_id = id(subprocess.run)
+    current_runner_id = (id(subprocess.run), id(shutil.which))
     if _CACHED_CAPABILITIES is not None and _CACHED_RUNNER_ID == current_runner_id:
         return _CACHED_CAPABILITIES
 

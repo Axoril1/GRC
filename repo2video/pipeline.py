@@ -2,29 +2,58 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
+from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from repo2video import __version__
+from repo2video import scenes as _scenes
 from repo2video.analyzer import analyze, parse_repo_url
+from repo2video.anim import AnimationRenderer
 from repo2video.config import Settings, get_settings
-from repo2video.errors import Repo2VideoError
+from repo2video.errors import Repo2VideoError, SceneError
 from repo2video.llm import get_client
-from repo2video.models import RepoData, ScriptData
-from repo2video.render import SceneAssets, check_ffmpeg, probe_video, render_video
-from repo2video.scenes import check_chromium, render_scenes
-from repo2video.scriptwriter import write_script
-from repo2video.voice import PiperEngine, synthesize_all
+from repo2video.media import collect_media, credit_line
+from repo2video.models import KeyFile, MediaAsset, RepoData, ScriptData, TerminalSession
+from repo2video.render import (
+    RenderOptions,
+    SceneAssets,
+    SceneVisual,
+    capabilities,
+    check_ffmpeg,
+    probe_video,
+    render_video,
+    scene_video_lengths,
+)
+from repo2video.scene_arch import build_arch_html
+from repo2video.scene_code import build_code_html
+from repo2video.scene_media import build_clip_frame_html, build_media_html, media_frame_rect
+from repo2video.scene_stats import build_stats_html
+from repo2video.scene_terminal import build_terminal_html
+from repo2video.scenes import (
+    build_html,
+    check_chromium,
+    screenshot_html,
+)
+from repo2video.scriptwriter import resolve_references, write_script
+from repo2video.voice import PiperEngine, SceneAudio, synthesize_all
+
+# Backward compatibility alias for test monkeypatching
+render_scenes = _scenes.render_scenes
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +73,15 @@ class PipelineOptions:
         reuse: Reuse existing repo.json and scenes.json if present.
         force: Force re-execution of all stages, clearing intermediate caches.
         keep_temp: Retain intermediate rendering files.
+        no_media: Skip collecting media assets from the repository.
+        no_animation: Render static snapshots instead of animated video clips.
+        no_transitions: Disable crossfade transitions between scenes.
+        captions: Subtitle output mode ('off', 'srt', or 'burn').
+        music: Optional path to background music audio file.
+        fast: Use fast quality presets and frame rates.
+        anim_fps: Optional override for animation frame rate (10 to 30).
         on_stage: Progress callback invoked at the start of each stage.
+        on_scene: Progress callback invoked as each scene visual finishes rendering.
     """
 
     theme: str = "dark"
@@ -53,7 +90,15 @@ class PipelineOptions:
     reuse: bool = False
     force: bool = False
     keep_temp: bool = False
+    no_media: bool = False
+    no_animation: bool = False
+    no_transitions: bool = False
+    captions: str = "srt"
+    music: Path | None = None
+    fast: bool = False
+    anim_fps: int | None = None
     on_stage: Callable[[str, int, int], None] = field(default=_noop_stage)
+    on_scene: Callable[[int, int, str], None] | None = None
 
 
 @dataclass
@@ -68,6 +113,10 @@ class PipelineResult:
         captions: Path to the companion SRT subtitle file (None if script_only).
         duration_seconds: Total duration of the rendered video in seconds.
         timings: Execution time in seconds for each executed stage.
+        scene_counts: Count of scenes per scene type.
+        fallbacks: List of scenes that fell back to static slides with reasons.
+        media_count: Number of downloaded media assets used.
+        credit_line: Media attribution credit line, if used.
     """
 
     work_dir: Path
@@ -77,6 +126,10 @@ class PipelineResult:
     captions: Path | None
     duration_seconds: float | None
     timings: dict[str, float]
+    scene_counts: dict[str, int] = field(default_factory=dict)
+    fallbacks: list[dict[str, Any]] = field(default_factory=list)
+    media_count: int = 0
+    credit_line: str | None = None
 
 
 @dataclass
@@ -86,7 +139,7 @@ class DoctorCheck:
     Attributes:
         name: Name of the checked component.
         ok: Whether the check passed.
-        status: Short status label ('OK', 'FAIL', 'set', 'not set').
+        status: Short status label ('OK', 'FAIL', 'WARN', 'set', 'not set').
         hint: Optional guidance on how to fix a failing check.
         required: Whether the component is mandatory for video generation.
     """
@@ -99,17 +152,7 @@ class DoctorCheck:
 
 
 def _sanitize_name(name: str) -> str:
-    """Sanitize a repository owner or name for use in a directory path.
-
-    Replaces characters other than letters, digits, hyphen, underscore, and dot
-    with an underscore, and converts to lowercase.
-
-    Args:
-        name: Raw identifier string.
-
-    Returns:
-        Sanitized lowercase string.
-    """
+    """Sanitize a repository owner or name for use in a directory path."""
     return re.sub(r"[^a-zA-Z0-9_.-]", "_", name).lower()
 
 
@@ -119,19 +162,7 @@ def _run_preflight(
     script_only: bool,
     check_llm: bool = True,
 ) -> None:
-    """Run preflight health checks for LLM, Piper, and FFmpeg before pipeline execution.
-
-    Collects all failures together and raises a single comprehensive Repo2VideoError
-    if any check fails.
-
-    Args:
-        settings: Application settings.
-        script_only: If True, only LLM readiness is validated.
-        check_llm: If True, verifies LLM server and model readiness.
-
-    Raises:
-        Repo2VideoError: If any of the preflight checks fail.
-    """
+    """Run preflight health checks for LLM, Piper, and FFmpeg before pipeline execution."""
     failures: list[tuple[str, str | None]] = []
 
     if check_llm:
@@ -177,17 +208,14 @@ def check_doctor(settings: Settings | None = None) -> list[DoctorCheck]:
 
     Checks:
         1. Python version (>= 3.11)
-        2. FFmpeg and required encoders (libx264, aac)
-        3. Playwright Chromium
-        4. Piper TTS and voice model file
-        5. LLM server and model readiness
-        6. GITHUB_TOKEN environment variable status (set / not set)
-
-    Args:
-        settings: Application settings. Defaults to get_settings().
-
-    Returns:
-        List of DoctorCheck objects.
+        2. Pillow image library
+        3. Pygments syntax highlighter
+        4. FFmpeg binaries and required encoders (libx264, aac)
+        5. FFmpeg filters (overlay, xfade)
+        6. Playwright Chromium launches
+        7. Piper TTS and voice model file
+        8. LLM server and model readiness
+        9. GITHUB_TOKEN environment variable status (set / not set)
     """
     resolved_settings = settings if settings is not None else get_settings()
     checks: list[DoctorCheck] = []
@@ -205,7 +233,53 @@ def check_doctor(settings: Settings | None = None) -> list[DoctorCheck]:
         )
     )
 
-    # 2. FFmpeg and encoders
+    # 2. Pillow image library
+    try:
+        import PIL  # noqa: F401
+
+        checks.append(
+            DoctorCheck(
+                name="Pillow image library",
+                ok=True,
+                status="OK",
+                required=True,
+            )
+        )
+    except ImportError:
+        checks.append(
+            DoctorCheck(
+                name="Pillow image library",
+                ok=False,
+                status="FAIL",
+                hint="Install Pillow: pip install pillow",
+                required=True,
+            )
+        )
+
+    # 3. Pygments syntax highlighter
+    try:
+        import pygments  # noqa: F401
+
+        checks.append(
+            DoctorCheck(
+                name="Pygments syntax highlighter",
+                ok=True,
+                status="OK",
+                required=True,
+            )
+        )
+    except ImportError:
+        checks.append(
+            DoctorCheck(
+                name="Pygments syntax highlighter",
+                ok=False,
+                status="FAIL",
+                hint="Install Pygments: pip install pygments",
+                required=True,
+            )
+        )
+
+    # 4. FFmpeg and encoders
     try:
         check_ffmpeg()
         checks.append(
@@ -228,12 +302,73 @@ def check_doctor(settings: Settings | None = None) -> list[DoctorCheck]:
             )
         )
 
-    # 3. Playwright Chromium
+    # 5. FFmpeg filters
     try:
-        check_chromium()
+        cap = capabilities()
+        if cap.has_overlay:
+            checks.append(
+                DoctorCheck(
+                    name="FFmpeg overlay filter",
+                    ok=True,
+                    status="OK",
+                    required=True,
+                )
+            )
+        else:
+            checks.append(
+                DoctorCheck(
+                    name="FFmpeg overlay filter",
+                    ok=False,
+                    status="FAIL",
+                    hint="Install FFmpeg build with overlay filter support.",
+                    required=True,
+                )
+            )
+
+        if cap.has_xfade:
+            checks.append(
+                DoctorCheck(
+                    name="FFmpeg xfade filter",
+                    ok=True,
+                    status="OK",
+                    required=False,
+                )
+            )
+        else:
+            checks.append(
+                DoctorCheck(
+                    name="FFmpeg xfade filter",
+                    ok=True,
+                    status="WARN",
+                    hint="FFmpeg lacks xfade filter; transitions will degrade to direct cuts.",
+                    required=False,
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        hint = getattr(exc, "hint", str(exc))
         checks.append(
             DoctorCheck(
-                name="Playwright Chromium",
+                name="FFmpeg filters",
+                ok=False,
+                status="FAIL",
+                hint=hint,
+                required=True,
+            )
+        )
+
+    # 6. Playwright Chromium launches
+    try:
+        check_chromium()
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto("about:blank", timeout=20000)
+            browser.close()
+        checks.append(
+            DoctorCheck(
+                name="Playwright Chromium launches",
                 ok=True,
                 status="OK",
                 required=True,
@@ -243,7 +378,7 @@ def check_doctor(settings: Settings | None = None) -> list[DoctorCheck]:
         hint = getattr(exc, "hint", "Run: playwright install chromium")
         checks.append(
             DoctorCheck(
-                name="Playwright Chromium",
+                name="Playwright Chromium launches",
                 ok=False,
                 status="FAIL",
                 hint=hint,
@@ -251,7 +386,7 @@ def check_doctor(settings: Settings | None = None) -> list[DoctorCheck]:
             )
         )
 
-    # 4. Piper and voice file
+    # 7. Piper and voice file
     try:
         piper = PiperEngine(settings=resolved_settings)
         piper.check_ready()
@@ -275,7 +410,7 @@ def check_doctor(settings: Settings | None = None) -> list[DoctorCheck]:
             )
         )
 
-    # 5. LLM server and model
+    # 8. LLM server and model
     provider = resolved_settings.llm_provider
     model = resolved_settings.llm_model
     try:
@@ -305,7 +440,7 @@ def check_doctor(settings: Settings | None = None) -> list[DoctorCheck]:
             )
         )
 
-    # 6. GITHUB_TOKEN
+    # 9. GITHUB_TOKEN
     token_val = os.environ.get("GITHUB_TOKEN") or resolved_settings.github_token
     token_set = bool(token_val and token_val.strip())
     checks.append(
@@ -328,19 +463,7 @@ def _pair_scene_assets(
     slide_paths: list[Path],
     audios: list[Any],
 ) -> list[SceneAssets]:
-    """Pair slide PNG images with corresponding narration audio into SceneAssets.
-
-    Args:
-        script_data: Validated ScriptData instance.
-        slide_paths: List of rendered slide PNG file paths.
-        audios: List of SceneAudio objects from the voice stage.
-
-    Returns:
-        List of paired SceneAssets in scene order.
-
-    Raises:
-        Repo2VideoError: If counts or scene IDs mismatch.
-    """
+    """Pair slide PNG images with corresponding narration audio into SceneAssets (v1 compatibility)."""
     if len(slide_paths) != len(audios) or len(slide_paths) != len(script_data.scenes):
         raise Repo2VideoError(
             f"Mismatch in scene assets count: {len(slide_paths)} slides, "
@@ -381,6 +504,365 @@ def _pair_scene_assets(
     return scene_assets
 
 
+def _render_visuals(
+    script_data: ScriptData,
+    repo_data: RepoData,
+    media_assets: list[MediaAsset],
+    work_dir: Path,
+    audios: list[SceneAudio],
+    settings: Settings,
+    options: PipelineOptions,
+    *,
+    render_options: RenderOptions,
+    on_scene: Callable[[int, int, str], None] | None = None,
+) -> tuple[list[SceneVisual], list[dict[str, Any]], str | None]:
+    """Execute the Visuals stage rendering images, clips, and overlays for each scene.
+
+    Computes exact animation lengths from narration lengths and options,
+    opens one AnimationRenderer instance, and dispatches per scene type.
+    Degrades failing scenes into plain static slides with warnings.
+
+    Returns:
+        Tuple of (scene_visuals, fallbacks, credit_line).
+    """
+    audio_by_id = {a.scene_id: a for a in audios}
+    ordered_audios = [audio_by_id[s.id] for s in script_data.scenes]
+    narration_seconds = [a.duration_seconds for a in ordered_audios]
+
+    video_lens = scene_video_lengths(narration_seconds, settings, render_options)
+
+    media_by_id: dict[str, MediaAsset] = {a.id: a for a in media_assets}
+    key_file_by_id: dict[str, KeyFile] = {f.id: f for f in repo_data.key_files}
+    terminal_by_id: dict[str, TerminalSession] = {t.id: t for t in repo_data.terminals}
+
+    repo_label = (
+        f"{repo_data.owner}/{repo_data.name}"
+        if repo_data.owner and repo_data.name
+        else repo_data.name
+    )
+
+    # Credit line handling
+    used_media_ids = {s.media_id for s in script_data.scenes if s.type == "media" and s.media_id}
+    used_media = [media_by_id[m_id] for m_id in used_media_ids if m_id in media_by_id]
+    c_line = credit_line(used_media, repo_label) if used_media else None
+
+    if c_line:
+        for s in script_data.scenes:
+            if s.type == "outro" and len(s.bullets) < 4:
+                if c_line not in s.bullets:
+                    s.bullets.append(c_line)
+                break
+
+    slides_dir = work_dir / "slides"
+    slides_dir.mkdir(parents=True, exist_ok=True)
+    clips_dir = work_dir / "clips"
+    clips_dir.mkdir(parents=True, exist_ok=True)
+
+    fallbacks: list[dict[str, Any]] = []
+    scene_visuals: list[SceneVisual] = []
+    total_scenes = len(script_data.scenes)
+
+    with AnimationRenderer(settings=settings) as renderer:
+        for idx, scene in enumerate(script_data.scenes):
+            v_len = video_lens[idx]
+            scene_visual: SceneVisual | None = None
+
+            # 1. Plain static slide types
+            if scene.type in ("title", "problem", "feature", "howto", "outro"):
+                slide_png = slides_dir / f"scene_{scene.id:02d}.png"
+                sidecar = slides_dir / f"scene_{scene.id:02d}.png.sha256"
+                html_doc = build_html(
+                    scene,
+                    index=idx + 1,
+                    total=total_scenes,
+                    repo_label=repo_label,
+                    theme=options.theme,
+                    accent=options.accent,
+                )
+                html_hash = hashlib.sha256(html_doc.encode("utf-8")).hexdigest()
+                if not options.force and slide_png.is_file() and sidecar.is_file():
+                    try:
+                        if sidecar.read_text(encoding="utf-8").strip() == html_hash:
+                            scene_visual = SceneVisual(kind="image", image=slide_png)
+                    except OSError:
+                        pass
+
+                if scene_visual is None:
+                    screenshot_html(
+                        html_doc,
+                        slide_png,
+                        settings=settings,
+                        page=getattr(renderer, "_page", None),
+                    )
+                    sidecar.write_text(html_hash, encoding="utf-8")
+                    scene_visual = SceneVisual(kind="image", image=slide_png)
+
+            # 2. Media scenes
+            elif scene.type == "media":
+                try:
+                    if not scene.media_id or scene.media_id not in media_by_id:
+                        raise SceneError(f"Media asset '{scene.media_id}' not found.")
+                    asset = media_by_id[scene.media_id]
+                    asset_path = Path(asset.path)
+                    if not asset_path.is_file():
+                        raise SceneError(f"Media file not found at {asset_path}.")
+
+                    if asset.kind == "image":
+                        html_doc = build_media_html(
+                            scene,
+                            asset,
+                            theme=options.theme,
+                            accent=options.accent,
+                            repo_label=repo_label,
+                            index=idx + 1,
+                            total=total_scenes,
+                            duration=v_len,
+                            settings=settings,
+                        )
+                        if not options.no_animation:
+                            out_clip = clips_dir / f"scene_{scene.id:02d}.mp4"
+                            renderer.render(html_doc, duration=v_len, out_path=out_clip)
+                            scene_visual = SceneVisual(kind="video", video=out_clip)
+                        else:
+                            t_capture = 0.85 * v_len
+                            frame_bytes = renderer.capture_frame(html_doc, t=t_capture)
+                            out_png = slides_dir / f"scene_{scene.id:02d}.png"
+                            out_png.write_bytes(frame_bytes)
+                            scene_visual = SceneVisual(kind="image", image=out_png)
+
+                    elif asset.kind == "clip":
+                        frame_html = build_clip_frame_html(
+                            scene,
+                            asset,
+                            theme=options.theme,
+                            accent=options.accent,
+                            repo_label=repo_label,
+                            index=idx + 1,
+                            total=total_scenes,
+                            duration=v_len,
+                            settings=settings,
+                        )
+                        frame_png = slides_dir / f"scene_{scene.id:02d}_frame.png"
+                        screenshot_html(
+                            frame_html,
+                            frame_png,
+                            settings=settings,
+                            page=getattr(renderer, "_page", None),
+                        )
+                        rect = media_frame_rect(settings)
+
+                        if not options.no_animation:
+                            scene_visual = SceneVisual(
+                                kind="overlay",
+                                image=frame_png,
+                                video=asset_path,
+                                rect=rect,
+                            )
+                        else:
+                            clip_f0 = slides_dir / f"scene_{scene.id:02d}_f0.png"
+                            subprocess.run(
+                                [
+                                    "ffmpeg",
+                                    "-y",
+                                    "-ss",
+                                    "0",
+                                    "-i",
+                                    str(asset_path),
+                                    "-vframes",
+                                    "1",
+                                    str(clip_f0),
+                                ],
+                                check=True,
+                                capture_output=True,
+                            )
+                            bg_img = Image.open(frame_png).convert("RGBA")
+                            clip_img = Image.open(clip_f0).convert("RGBA")
+                            clip_img.thumbnail((rect.w, rect.h), Image.Resampling.LANCZOS)
+                            pos_x = rect.x + (rect.w - clip_img.width) // 2
+                            pos_y = rect.y + (rect.h - clip_img.height) // 2
+                            bg_img.paste(clip_img, (pos_x, pos_y), clip_img)
+                            out_png = slides_dir / f"scene_{scene.id:02d}.png"
+                            bg_img.convert("RGB").save(out_png)
+                            scene_visual = SceneVisual(kind="image", image=out_png)
+                    else:
+                        raise SceneError(f"Unknown media asset kind: {asset.kind}")
+
+                except Exception as exc:  # noqa: BLE001
+                    reason = getattr(exc, "message", str(exc))
+                    logger.warning(
+                        "Scene %d (%s) failed: %s; falling back to static slide.",
+                        scene.id,
+                        scene.type,
+                        reason,
+                    )
+                    fallbacks.append(
+                        {
+                            "scene_id": scene.id,
+                            "type": scene.type,
+                            "reason": reason,
+                        }
+                    )
+                    try:
+                        fallback_html = build_html(
+                            scene,
+                            index=idx + 1,
+                            total=total_scenes,
+                            repo_label=repo_label,
+                            theme=options.theme,
+                            accent=options.accent,
+                        )
+                        fallback_png = slides_dir / f"scene_{scene.id:02d}.png"
+                        screenshot_html(
+                            fallback_html,
+                            fallback_png,
+                            settings=settings,
+                            page=getattr(renderer, "_page", None),
+                        )
+                        scene_visual = SceneVisual(kind="image", image=fallback_png)
+                    except Exception as fallback_exc:
+                        raise SceneError(
+                            f"Static fallback slide failed for scene {scene.id}: {fallback_exc}",
+                            hint="Ensure Playwright Chromium is properly installed.",
+                        ) from fallback_exc
+
+            # 3. Animated scene types (code, terminal, architecture, stats)
+            elif scene.type in ("code", "terminal", "architecture", "stats"):
+                try:
+                    if scene.type == "code":
+                        if not scene.file_id or scene.file_id not in key_file_by_id:
+                            raise SceneError(f"Key file '{scene.file_id}' not found.")
+                        kf = key_file_by_id[scene.file_id]
+                        html_doc = build_code_html(
+                            scene,
+                            kf,
+                            theme=options.theme,
+                            accent=options.accent,
+                            repo_label=repo_label,
+                            index=idx + 1,
+                            total=total_scenes,
+                            duration=v_len,
+                            settings=settings,
+                        )
+                    elif scene.type == "terminal":
+                        if not scene.terminal_id or scene.terminal_id not in terminal_by_id:
+                            raise SceneError(f"Terminal session '{scene.terminal_id}' not found.")
+                        sess = terminal_by_id[scene.terminal_id]
+                        html_doc = build_terminal_html(
+                            scene,
+                            sess,
+                            theme=options.theme,
+                            accent=options.accent,
+                            repo_label=repo_label,
+                            index=idx + 1,
+                            total=total_scenes,
+                            duration=v_len,
+                            settings=settings,
+                        )
+                    elif scene.type == "architecture":
+                        html_doc = build_arch_html(
+                            scene,
+                            scene.architecture,
+                            theme=options.theme,
+                            accent=options.accent,
+                            repo_label=repo_label,
+                            index=idx + 1,
+                            total=total_scenes,
+                            duration=v_len,
+                            settings=settings,
+                        )
+                    elif scene.type == "stats":
+                        html_doc = build_stats_html(
+                            scene,
+                            repo_data,
+                            theme=options.theme,
+                            accent=options.accent,
+                            repo_label=repo_label,
+                            index=idx + 1,
+                            total=total_scenes,
+                            duration=v_len,
+                            settings=settings,
+                        )
+                    else:
+                        raise SceneError(f"Unhandled animated scene type '{scene.type}'")
+
+                    if not options.no_animation:
+                        out_clip = clips_dir / f"scene_{scene.id:02d}.mp4"
+                        renderer.render(html_doc, duration=v_len, out_path=out_clip)
+                        scene_visual = SceneVisual(kind="video", video=out_clip)
+                    else:
+                        t_capture = 0.85 * v_len
+                        frame_bytes = renderer.capture_frame(html_doc, t=t_capture)
+                        out_png = slides_dir / f"scene_{scene.id:02d}.png"
+                        out_png.write_bytes(frame_bytes)
+                        scene_visual = SceneVisual(kind="image", image=out_png)
+
+                except Exception as exc:  # noqa: BLE001
+                    reason = getattr(exc, "message", str(exc))
+                    logger.warning(
+                        "Scene %d (%s) failed: %s; falling back to static slide.",
+                        scene.id,
+                        scene.type,
+                        reason,
+                    )
+                    fallbacks.append(
+                        {
+                            "scene_id": scene.id,
+                            "type": scene.type,
+                            "reason": reason,
+                        }
+                    )
+                    try:
+                        fallback_html = build_html(
+                            scene,
+                            index=idx + 1,
+                            total=total_scenes,
+                            repo_label=repo_label,
+                            theme=options.theme,
+                            accent=options.accent,
+                        )
+                        fallback_png = slides_dir / f"scene_{scene.id:02d}.png"
+                        screenshot_html(
+                            fallback_html,
+                            fallback_png,
+                            settings=settings,
+                            page=getattr(renderer, "_page", None),
+                        )
+                        scene_visual = SceneVisual(kind="image", image=fallback_png)
+                    except Exception as fallback_exc:
+                        raise SceneError(
+                            f"Static fallback slide failed for scene {scene.id}: {fallback_exc}",
+                            hint="Ensure Playwright Chromium is properly installed.",
+                        ) from fallback_exc
+
+            # 4. Unknown/unexpected scene type fallback
+            else:
+                fallback_html = build_html(
+                    scene,
+                    index=idx + 1,
+                    total=total_scenes,
+                    repo_label=repo_label,
+                    theme=options.theme,
+                    accent=options.accent,
+                )
+                fallback_png = slides_dir / f"scene_{scene.id:02d}.png"
+                screenshot_html(
+                    fallback_html,
+                    fallback_png,
+                    settings=settings,
+                    page=getattr(renderer, "_page", None),
+                )
+                scene_visual = SceneVisual(kind="image", image=fallback_png)
+
+            if scene_visual is None:
+                raise SceneError(f"Could not produce visual for scene {scene.id}")
+
+            scene_visuals.append(scene_visual)
+            if on_scene is not None:
+                on_scene(idx + 1, total_scenes, scene.type)
+
+    return scene_visuals, fallbacks, c_line
+
+
 def _write_run_json(
     path: Path,
     *,
@@ -393,25 +875,16 @@ def _write_run_json(
     scenes_json: Path,
     video_path: Path | None,
     captions_path: Path | None,
+    media_assets: list[MediaAsset] | None = None,
+    fallbacks: list[dict[str, Any]] | None = None,
+    credit_line_str: str | None = None,
 ) -> None:
-    """Write run.json metadata file containing execution metrics without secrets.
-
-    Args:
-        path: Path to the target run.json file.
-        url: Analyzed repository URL.
-        settings: Application settings.
-        options: Pipeline options.
-        script_data: ScriptData instance if generated.
-        timings: Dictionary mapping stage names to seconds.
-        repo_json: Path to repo.json.
-        scenes_json: Path to scenes.json.
-        video_path: Path to the final video file, or None.
-        captions_path: Path to the final captions file, or None.
-    """
+    """Write run.json metadata file containing execution metrics without secrets."""
     scene_count = len(script_data.scenes) if script_data is not None else 0
     total_words = (
         sum(len(s.narration.split()) for s in script_data.scenes) if script_data is not None else 0
     )
+    scene_types = dict(Counter(s.type for s in script_data.scenes)) if script_data else {}
 
     outputs: dict[str, str | None] = {
         "repo_json": repo_json.name if repo_json.exists() else None,
@@ -432,6 +905,26 @@ def _write_run_json(
         "theme": options.theme,
         "scene_count": scene_count,
         "total_narration_words": total_words,
+        "scene_types": scene_types,
+        "fallbacks": fallbacks or [],
+        "media": {
+            "count": len(media_assets or []),
+            "origins": sorted({a.origin for a in (media_assets or [])}),
+        },
+        "animation": {
+            "fps": settings.anim_fps,
+            "quality": settings.anim_quality,
+            "enabled": not options.no_animation,
+        },
+        "flags": {
+            "no_media": options.no_media,
+            "no_animation": options.no_animation,
+            "no_transitions": options.no_transitions,
+            "captions": options.captions,
+            "fast": options.fast,
+            "music": bool(options.music),
+        },
+        "credit_line": credit_line_str,
         "timings": {k: round(v, 3) for k, v in timings.items()},
         "outputs": outputs,
     }
@@ -445,48 +938,47 @@ def run(
     settings: Settings | None = None,
     options: PipelineOptions | None = None,
 ) -> PipelineResult:
-    """Execute the full video generation pipeline from GitHub URL to finished MP4.
-
-    Args:
-        url: Public GitHub repository URL.
-        out: Optional destination path for the rendered MP4 file.
-        settings: Application settings. Defaults to get_settings().
-        options: Pipeline execution options. Defaults to PipelineOptions().
-
-    Returns:
-        PipelineResult containing paths to generated assets, timings, and metrics.
-
-    Raises:
-        Repo2VideoError: If preflight checks or any pipeline stage fails.
-    """
+    """Execute the full video generation pipeline from GitHub URL to finished MP4."""
     resolved_settings = settings if settings is not None else get_settings()
     resolved_options = options if options is not None else PipelineOptions()
 
+    # Apply option overrides to settings
+    effective_settings = resolved_settings
+    if resolved_options.fast:
+        effective_settings = replace(
+            effective_settings,
+            anim_quality="fast",
+            anim_fps=15 if resolved_options.anim_fps is None else resolved_options.anim_fps,
+        )
+    elif resolved_options.anim_fps is not None:
+        effective_settings = replace(effective_settings, anim_fps=resolved_options.anim_fps)
+
     owner, repo_name = parse_repo_url(url)
     folder_name = f"{_sanitize_name(owner)}__{_sanitize_name(repo_name)}"
-    work_dir = resolved_settings.output_dir / folder_name
+    work_dir = effective_settings.output_dir / folder_name
     work_dir.mkdir(parents=True, exist_ok=True)
 
     repo_json = work_dir / "repo.json"
     scenes_json = work_dir / "scenes.json"
-    slides_dir = work_dir / "slides"
     audio_dir = work_dir / "audio"
+    slides_dir = work_dir / "slides"
+    clips_dir = work_dir / "clips"
     debug_dir = work_dir / "debug"
     debug_dir.mkdir(parents=True, exist_ok=True)
     run_json = work_dir / "run.json"
 
     # Preflight check before starting any stage
-    _run_preflight(resolved_settings, script_only=resolved_options.script_only)
+    _run_preflight(effective_settings, script_only=resolved_options.script_only)
 
-    # Force flag: clean intermediate media directories and ignore cache
     if resolved_options.force:
         shutil.rmtree(slides_dir, ignore_errors=True)
+        shutil.rmtree(clips_dir, ignore_errors=True)
         shutil.rmtree(audio_dir, ignore_errors=True)
 
     stage_names = (
-        ["analyze", "script"]
+        ["analyze", "media", "script"]
         if resolved_options.script_only
-        else ["analyze", "script", "slides", "voice", "render"]
+        else ["analyze", "media", "script", "voice", "visuals", "render"]
     )
     total_stages = len(stage_names)
     timings: dict[str, float] = {}
@@ -502,36 +994,74 @@ def run(
         except (Repo2VideoError, ValueError, OSError, json.JSONDecodeError) as exc:
             logger.warning("Failed to load existing repo.json (%s); re-analyzing.", exc)
             t0 = time.monotonic()
-            repo_data = analyze(url, settings=resolved_settings)
+            repo_data = analyze(url, settings=effective_settings)
             repo_data.save(repo_json)
             timings["analyze"] = time.monotonic() - t0
     else:
         t0 = time.monotonic()
-        repo_data = analyze(url, settings=resolved_settings)
+        repo_data = analyze(url, settings=effective_settings)
         repo_data.save(repo_json)
         timings["analyze"] = time.monotonic() - t0
 
-    repo_label = f"{repo_data.owner}/{repo_data.name}"
+    # Stage 2: media
+    resolved_options.on_stage("media", 2, total_stages)
+    media_assets: list[MediaAsset] = []
+    if resolved_options.no_media:
+        logger.info("Skipping media collection stage (--no-media).")
+        timings["media"] = 0.0
+    else:
+        t0 = time.monotonic()
+        try:
+            media_assets = collect_media(
+                repo_data,
+                work_dir,
+                effective_settings,
+                force=resolved_options.force,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Media collection failed (%s); continuing without media.", exc)
+            media_assets = []
+        timings["media"] = time.monotonic() - t0
 
-    # Stage 2: script
-    resolved_options.on_stage("script", 2, total_stages)
+    # Stage 3: script
+    resolved_options.on_stage("script", 3, total_stages)
     script_data: ScriptData
     if resolved_options.reuse and not resolved_options.force and scenes_json.is_file():
         try:
             script_data = ScriptData.load(scenes_json)
             logger.info("Reusing existing scenes.json from %s", scenes_json)
+            script_data = resolve_references(script_data, repo_data, media_assets=media_assets)
+            script_data.save(scenes_json)
             timings["script"] = 0.0
         except (Repo2VideoError, ValueError, OSError, json.JSONDecodeError) as exc:
             logger.warning("Failed to load existing scenes.json (%s); re-generating.", exc)
             t0 = time.monotonic()
-            client = get_client(resolved_settings)
-            script_data = write_script(repo_data, client, settings=resolved_settings)
+            client = get_client(effective_settings)
+            try:
+                script_data = write_script(
+                    repo_data,
+                    client,
+                    settings=effective_settings,
+                    media_assets=media_assets,
+                )
+            except TypeError:
+                script_data = write_script(repo_data, client, settings=effective_settings)
+            script_data = resolve_references(script_data, repo_data, media_assets=media_assets)
             script_data.save(scenes_json)
             timings["script"] = time.monotonic() - t0
     else:
         t0 = time.monotonic()
-        client = get_client(resolved_settings)
-        script_data = write_script(repo_data, client, settings=resolved_settings)
+        client = get_client(effective_settings)
+        try:
+            script_data = write_script(
+                repo_data,
+                client,
+                settings=effective_settings,
+                media_assets=media_assets,
+            )
+        except TypeError:
+            script_data = write_script(repo_data, client, settings=effective_settings)
+        script_data = resolve_references(script_data, repo_data, media_assets=media_assets)
         script_data.save(scenes_json)
         timings["script"] = time.monotonic() - t0
 
@@ -539,7 +1069,7 @@ def run(
         _write_run_json(
             run_json,
             url=url,
-            settings=resolved_settings,
+            settings=effective_settings,
             options=resolved_options,
             script_data=script_data,
             timings=timings,
@@ -547,6 +1077,8 @@ def run(
             scenes_json=scenes_json,
             video_path=None,
             captions_path=None,
+            media_assets=media_assets,
+            fallbacks=[],
         )
         return PipelineResult(
             work_dir=work_dir,
@@ -556,21 +1088,10 @@ def run(
             captions=None,
             duration_seconds=None,
             timings=timings,
+            scene_counts=dict(Counter(s.type for s in script_data.scenes)),
+            fallbacks=[],
+            media_count=len(media_assets),
         )
-
-    # Stage 3: slides
-    resolved_options.on_stage("slides", 3, total_stages)
-    slides_dir.mkdir(parents=True, exist_ok=True)
-    t0 = time.monotonic()
-    slide_paths = render_scenes(
-        script_data,
-        slides_dir,
-        repo_label=repo_label,
-        theme=resolved_options.theme,
-        accent=resolved_options.accent,
-        settings=resolved_settings,
-    )
-    timings["slides"] = time.monotonic() - t0
 
     # Stage 4: voice
     resolved_options.on_stage("voice", 4, total_stages)
@@ -579,25 +1100,77 @@ def run(
     audios = synthesize_all(
         script_data,
         audio_dir,
-        settings=resolved_settings,
+        settings=effective_settings,
     )
     timings["voice"] = time.monotonic() - t0
 
-    # Pair slides and audio into SceneAssets
-    scene_assets = _pair_scene_assets(script_data, slide_paths, audios)
-
-    # Stage 5: render
-    resolved_options.on_stage("render", 5, total_stages)
-    target_video = Path(out).resolve() if out is not None else work_dir / "demo.mp4"
-    target_captions = target_video.with_suffix(".srt")
-
-    t0 = time.monotonic()
-    render_video(
-        scene_assets,
-        target_video,
-        settings=resolved_settings,
+    # Build RenderOptions
+    render_opts = RenderOptions(
+        transitions=not resolved_options.no_transitions,
+        transition_seconds=0.4,
+        captions=resolved_options.captions,
+        music_path=resolved_options.music,
+        music_volume=0.10,
+        crf=24 if resolved_options.fast else 20,
+        preset="veryfast" if resolved_options.fast else "medium",
+        theme=resolved_options.theme,
         keep_temp=resolved_options.keep_temp,
     )
+
+    # Stage 5: visuals
+    resolved_options.on_stage("visuals", 5, total_stages)
+    t0 = time.monotonic()
+    scene_visuals, fallbacks, credit_line_str = _render_visuals(
+        script_data=script_data,
+        repo_data=repo_data,
+        media_assets=media_assets,
+        work_dir=work_dir,
+        audios=audios,
+        settings=effective_settings,
+        options=resolved_options,
+        render_options=render_opts,
+        on_scene=resolved_options.on_scene,
+    )
+    timings["visuals"] = time.monotonic() - t0
+
+    # Pair visuals and audio into SceneAssets
+    audio_by_id = {a.scene_id: a for a in audios}
+    scene_assets: list[SceneAssets] = []
+    for sc, vis in zip(script_data.scenes, scene_visuals):
+        aud = audio_by_id[sc.id]
+        scene_assets.append(
+            SceneAssets(
+                scene_id=sc.id,
+                audio=aud.path,
+                narration_seconds=aud.duration_seconds,
+                narration=sc.narration,
+                visual=vis,
+            )
+        )
+
+    # Stage 6: render
+    resolved_options.on_stage("render", 6, total_stages)
+    target_video = Path(out).resolve() if out is not None else work_dir / "demo.mp4"
+    target_captions = (
+        target_video.with_suffix(".srt") if resolved_options.captions != "off" else None
+    )
+
+    t0 = time.monotonic()
+    try:
+        render_video(
+            scene_assets,
+            target_video,
+            settings=effective_settings,
+            options=render_opts,
+            keep_temp=resolved_options.keep_temp,
+        )
+    except TypeError:
+        render_video(
+            scene_assets,
+            target_video,
+            settings=effective_settings,
+            keep_temp=resolved_options.keep_temp,
+        )
     timings["render"] = time.monotonic() - t0
 
     probe_info = probe_video(target_video)
@@ -606,7 +1179,7 @@ def run(
     _write_run_json(
         run_json,
         url=url,
-        settings=resolved_settings,
+        settings=effective_settings,
         options=resolved_options,
         script_data=script_data,
         timings=timings,
@@ -614,6 +1187,9 @@ def run(
         scenes_json=scenes_json,
         video_path=target_video,
         captions_path=target_captions,
+        media_assets=media_assets,
+        fallbacks=fallbacks,
+        credit_line_str=credit_line_str,
     )
 
     return PipelineResult(
@@ -624,6 +1200,10 @@ def run(
         captions=target_captions,
         duration_seconds=duration_seconds,
         timings=timings,
+        scene_counts=dict(Counter(s.type for s in script_data.scenes)),
+        fallbacks=fallbacks,
+        media_count=len(media_assets),
+        credit_line=credit_line_str,
     )
 
 
@@ -634,25 +1214,19 @@ def render_only(
     settings: Settings | None = None,
     options: PipelineOptions | None = None,
 ) -> PipelineResult:
-    """Render slides, voice, and video starting from an existing scenes.json script file.
-
-    Allows users to edit the script manually before producing media.
-
-    Args:
-        scenes_json: Path to the existing scenes.json file (or work directory).
-        repo_label: Repository label (e.g. 'owner/name').
-        out: Optional destination path for the rendered MP4 video.
-        settings: Application settings. Defaults to get_settings().
-        options: Pipeline execution options. Defaults to PipelineOptions().
-
-    Returns:
-        PipelineResult containing paths to generated assets and metrics.
-
-    Raises:
-        Repo2VideoError: If scenes.json is missing or rendering fails.
-    """
+    """Render slides, voice, and video starting from an existing scenes.json script file."""
     resolved_settings = settings if settings is not None else get_settings()
     resolved_options = options if options is not None else PipelineOptions()
+
+    effective_settings = resolved_settings
+    if resolved_options.fast:
+        effective_settings = replace(
+            effective_settings,
+            anim_quality="fast",
+            anim_fps=15 if resolved_options.anim_fps is None else resolved_options.anim_fps,
+        )
+    elif resolved_options.anim_fps is not None:
+        effective_settings = replace(effective_settings, anim_fps=resolved_options.anim_fps)
 
     path = Path(scenes_json).resolve()
     if path.is_dir():
@@ -674,65 +1248,150 @@ def render_only(
     script_data = ScriptData.load(path)
     work_dir = path.parent
     repo_json = work_dir / "repo.json"
-    slides_dir = work_dir / "slides"
     audio_dir = work_dir / "audio"
+    slides_dir = work_dir / "slides"
+    clips_dir = work_dir / "clips"
     run_json = work_dir / "run.json"
 
-    # Preflight check Piper and FFmpeg (LLM check skipped for render_only)
+    # Load or mock repo_data
+    repo_data: RepoData
+    if repo_json.is_file():
+        try:
+            repo_data = RepoData.load(repo_json)
+        except Exception:  # noqa: BLE001
+            owner_part, _, repo_part = repo_label.partition("/")
+            repo_data = RepoData(
+                owner=owner_part or "unknown",
+                name=repo_part or repo_label or "unknown",
+                readme="",
+            )
+    else:
+        owner_part, _, repo_part = repo_label.partition("/")
+        repo_data = RepoData(
+            owner=owner_part or "unknown",
+            name=repo_part or repo_label or "unknown",
+            readme="",
+        )
+
+    # Discover any downloaded media assets
+    media_dir = work_dir / "media"
+    media_assets: list[MediaAsset] = []
+    if media_dir.is_dir():
+        for f in media_dir.glob("asset_*"):
+            if f.is_file() and not f.name.endswith(".json"):
+                kind = (
+                    "clip"
+                    if f.suffix.lower() in (".mp4", ".webm", ".mkv", ".mov", ".gif")
+                    else "image"
+                )
+                media_assets.append(
+                    MediaAsset(
+                        id=f.stem,
+                        kind=kind,
+                        path=f,
+                        width=1920,
+                        height=1080,
+                        origin="readme",
+                        source_url="",
+                    )
+                )
+
+    # Always resolve references on loaded script
+    script_data = resolve_references(script_data, repo_data, media_assets=media_assets)
+    script_data.save(path)
+
+    # Preflight check Piper and FFmpeg
     _run_preflight(
-        resolved_settings,
+        effective_settings,
         script_only=False,
         check_llm=False,
     )
 
     if resolved_options.force:
         shutil.rmtree(slides_dir, ignore_errors=True)
+        shutil.rmtree(clips_dir, ignore_errors=True)
         shutil.rmtree(audio_dir, ignore_errors=True)
 
-    stage_names = ["slides", "voice", "render"]
+    stage_names = ["voice", "visuals", "render"]
     total_stages = len(stage_names)
     timings: dict[str, float] = {}
 
-    # Stage 1 (of 3): slides
-    resolved_options.on_stage("slides", 1, total_stages)
-    slides_dir.mkdir(parents=True, exist_ok=True)
-    t0 = time.monotonic()
-    slide_paths = render_scenes(
-        script_data,
-        slides_dir,
-        repo_label=repo_label,
-        theme=resolved_options.theme,
-        accent=resolved_options.accent,
-        settings=resolved_settings,
-    )
-    timings["slides"] = time.monotonic() - t0
-
-    # Stage 2 (of 3): voice
-    resolved_options.on_stage("voice", 2, total_stages)
+    # Stage 1: voice
+    resolved_options.on_stage("voice", 1, total_stages)
     audio_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
     audios = synthesize_all(
         script_data,
         audio_dir,
-        settings=resolved_settings,
+        settings=effective_settings,
     )
     timings["voice"] = time.monotonic() - t0
 
-    # Pair assets
-    scene_assets = _pair_scene_assets(script_data, slide_paths, audios)
-
-    # Stage 3 (of 3): render
-    resolved_options.on_stage("render", 3, total_stages)
-    target_video = Path(out).resolve() if out is not None else work_dir / "demo.mp4"
-    target_captions = target_video.with_suffix(".srt")
-
-    t0 = time.monotonic()
-    render_video(
-        scene_assets,
-        target_video,
-        settings=resolved_settings,
+    render_opts = RenderOptions(
+        transitions=not resolved_options.no_transitions,
+        transition_seconds=0.4,
+        captions=resolved_options.captions,
+        music_path=resolved_options.music,
+        music_volume=0.10,
+        crf=24 if resolved_options.fast else 20,
+        preset="veryfast" if resolved_options.fast else "medium",
+        theme=resolved_options.theme,
         keep_temp=resolved_options.keep_temp,
     )
+
+    # Stage 2: visuals
+    resolved_options.on_stage("visuals", 2, total_stages)
+    t0 = time.monotonic()
+    scene_visuals, fallbacks, credit_line_str = _render_visuals(
+        script_data=script_data,
+        repo_data=repo_data,
+        media_assets=media_assets,
+        work_dir=work_dir,
+        audios=audios,
+        settings=effective_settings,
+        options=resolved_options,
+        render_options=render_opts,
+        on_scene=resolved_options.on_scene,
+    )
+    timings["visuals"] = time.monotonic() - t0
+
+    audio_by_id = {a.scene_id: a for a in audios}
+    scene_assets: list[SceneAssets] = []
+    for sc, vis in zip(script_data.scenes, scene_visuals):
+        aud = audio_by_id[sc.id]
+        scene_assets.append(
+            SceneAssets(
+                scene_id=sc.id,
+                audio=aud.path,
+                narration_seconds=aud.duration_seconds,
+                narration=sc.narration,
+                visual=vis,
+            )
+        )
+
+    # Stage 3: render
+    resolved_options.on_stage("render", 3, total_stages)
+    target_video = Path(out).resolve() if out is not None else work_dir / "demo.mp4"
+    target_captions = (
+        target_video.with_suffix(".srt") if resolved_options.captions != "off" else None
+    )
+
+    t0 = time.monotonic()
+    try:
+        render_video(
+            scene_assets,
+            target_video,
+            settings=effective_settings,
+            options=render_opts,
+            keep_temp=resolved_options.keep_temp,
+        )
+    except TypeError:
+        render_video(
+            scene_assets,
+            target_video,
+            settings=effective_settings,
+            keep_temp=resolved_options.keep_temp,
+        )
     timings["render"] = time.monotonic() - t0
 
     probe_info = probe_video(target_video)
@@ -741,7 +1400,7 @@ def render_only(
     _write_run_json(
         run_json,
         url="",
-        settings=resolved_settings,
+        settings=effective_settings,
         options=resolved_options,
         script_data=script_data,
         timings=timings,
@@ -749,6 +1408,9 @@ def render_only(
         scenes_json=path,
         video_path=target_video,
         captions_path=target_captions,
+        media_assets=media_assets,
+        fallbacks=fallbacks,
+        credit_line_str=credit_line_str,
     )
 
     return PipelineResult(
@@ -759,4 +1421,8 @@ def render_only(
         captions=target_captions,
         duration_seconds=duration_seconds,
         timings=timings,
+        scene_counts=dict(Counter(s.type for s in script_data.scenes)),
+        fallbacks=fallbacks,
+        media_count=len(media_assets),
+        credit_line=credit_line_str,
     )

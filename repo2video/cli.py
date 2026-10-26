@@ -35,13 +35,15 @@ app = typer.Typer(
 
 STAGE_DESCRIPTIONS: dict[str, str] = {
     "analyze": "Analyzing repository",
+    "media": "Collecting media assets",
     "script": "Writing the script",
-    "slides": "Rendering slide images",
     "voice": "Synthesizing voice narration",
+    "visuals": "Rendering visual scenes",
     "render": "Compositing video with FFmpeg",
 }
 
 HEX_COLOR_PATTERN = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+ALLOWED_MUSIC_EXTENSIONS: frozenset[str] = frozenset([".mp3", ".wav", ".ogg", ".m4a", ".flac"])
 
 
 def _version_callback(value: bool) -> None:
@@ -85,6 +87,10 @@ class _StageProgressTracker:
         desc = STAGE_DESCRIPTIONS.get(name, name)
         typer.echo(f"[{number}/{total}] {desc}...", err=True)
 
+    def on_scene(self, current: int, total: int, scene_type: str) -> None:
+        """Callback invoked as each individual scene finishes visual rendering."""
+        logger.info("Scene %d/%d (%s) visuals ready", current, total, scene_type)
+
     def finish(self) -> None:
         """Report completion timing for the final stage."""
         if self.stage_start is not None and self.current_stage is not None:
@@ -94,9 +100,25 @@ class _StageProgressTracker:
             self.stage_start = None
 
 
-def _print_summary(result: PipelineResult, total_time: float) -> None:
+def _print_summary(
+    result: PipelineResult,
+    total_time: float,
+    *,
+    no_media: bool = False,
+) -> None:
     """Print a structured execution summary to standard error."""
     lines = ["\nSummary:"]
+    if result.scene_counts:
+        counts_str = ", ".join(
+            f"{count}x {stype}" for stype, count in sorted(result.scene_counts.items())
+        )
+        lines.append(f"  Scenes:   {counts_str}")
+
+    if result.fallbacks:
+        lines.append("  Fallbacks:")
+        for f in result.fallbacks:
+            lines.append(f"    - Scene {f['scene_id']} ({f['type']}): {f['reason']}")
+
     if result.video is not None and result.video.exists():
         size_mb = result.video.stat().st_size / (1024 * 1024)
         dur = f"{result.duration_seconds:.1f}s" if result.duration_seconds is not None else "N/A"
@@ -110,13 +132,34 @@ def _print_summary(result: PipelineResult, total_time: float) -> None:
     lines.append(f"  Total:    {total_time:.2f}s")
     typer.echo("\n".join(lines), err=True)
 
+    if result.fallbacks:
+        typer.secho(
+            "Some scenes fell back to plain static slides:", fg=typer.colors.YELLOW, err=True
+        )
+        for f in result.fallbacks:
+            typer.secho(
+                f"  Scene {f['scene_id']} ({f['type']}): {f['reason']}",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+
+    if result.media_count == 0 and not no_media:
+        typer.secho(
+            "This repository has no usable screenshots. Try a repository with images in its README or a homepage.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+
 
 def _validate_options(
     theme: str,
     accent: str,
     provider: str | None,
     voice_speed: float | None,
-) -> tuple[str, str, str | None, float | None]:
+    captions: str = "srt",
+    music: Path | None = None,
+    anim_fps: int | None = None,
+) -> tuple[str, str, str | None, float | None, str, Path | None, int | None]:
     """Validate CLI option values and return normalized forms.
 
     Raises:
@@ -146,7 +189,39 @@ def _validate_options(
             raise typer.BadParameter(f"voice_speed must be between 0.5 and 1.5, got {voice_speed}.")
         clean_speed = voice_speed
 
-    return clean_theme, clean_accent, clean_provider, clean_speed
+    clean_captions = captions.strip().lower()
+    if clean_captions not in ("off", "srt", "burn"):
+        raise typer.BadParameter(
+            f"Unknown captions mode '{captions}'. Must be 'off', 'srt', or 'burn'."
+        )
+
+    clean_music: Path | None = None
+    if music is not None:
+        clean_music = Path(music).resolve()
+        if not clean_music.is_file():
+            raise typer.BadParameter(f"Music file not found at '{music}'.")
+        if clean_music.suffix.lower() not in ALLOWED_MUSIC_EXTENSIONS:
+            allowed = ", ".join(sorted(ALLOWED_MUSIC_EXTENSIONS))
+            raise typer.BadParameter(
+                f"Unsupported music file extension '{clean_music.suffix}'. Allowed: {allowed}."
+            )
+        typer.echo("Make sure you have the right to use this music.", err=True)
+
+    clean_anim_fps: int | None = None
+    if anim_fps is not None:
+        if not (10 <= anim_fps <= 30):
+            raise typer.BadParameter(f"anim-fps must be between 10 and 30, got {anim_fps}.")
+        clean_anim_fps = anim_fps
+
+    return (
+        clean_theme,
+        clean_accent,
+        clean_provider,
+        clean_speed,
+        clean_captions,
+        clean_music,
+        clean_anim_fps,
+    )
 
 
 def _apply_settings_overrides(
@@ -154,6 +229,8 @@ def _apply_settings_overrides(
     provider: str | None = None,
     model: str | None = None,
     voice_speed: float | None = None,
+    anim_fps: int | None = None,
+    fast: bool = False,
 ) -> Settings:
     """Create a new Settings instance with overridden fields using dataclasses.replace."""
     overrides: dict[str, Any] = {}
@@ -163,6 +240,12 @@ def _apply_settings_overrides(
         overrides["llm_model"] = model.strip()
     if voice_speed is not None:
         overrides["voice_speed"] = voice_speed
+    if anim_fps is not None:
+        overrides["anim_fps"] = anim_fps
+    if fast:
+        overrides["anim_quality"] = "fast"
+        if anim_fps is None:
+            overrides["anim_fps"] = 15
 
     if overrides:
         return replace(settings, **overrides)
@@ -210,7 +293,7 @@ def make(
         str | None,
         typer.Option(
             "--model",
-            help="LLM model name (e.g. 'mistral:latest' or 'gpt-4o-mini').",
+            help="LLM model name (e.g. 'qwen2.5:7b' or 'gpt-4o-mini').",
         ),
     ] = None,
     voice_speed: Annotated[
@@ -256,15 +339,75 @@ def make(
             help="Enable verbose debug logging.",
         ),
     ] = False,
+    no_media: Annotated[
+        bool,
+        typer.Option(
+            "--no-media",
+            help="Skip downloading and displaying repository screenshots and clips.",
+        ),
+    ] = False,
+    no_animation: Annotated[
+        bool,
+        typer.Option(
+            "--no-animation",
+            help="Render animated scenes as static snapshots instead of video clips.",
+        ),
+    ] = False,
+    no_transitions: Annotated[
+        bool,
+        typer.Option(
+            "--no-transitions",
+            help="Disable crossfade transitions between scenes.",
+        ),
+    ] = False,
+    captions: Annotated[
+        str,
+        typer.Option(
+            "--captions",
+            help="Subtitle caption mode ('off', 'srt', or 'burn').",
+        ),
+    ] = "srt",
+    music: Annotated[
+        Path | None,
+        typer.Option(
+            "--music",
+            help="Path to background music audio file.",
+        ),
+    ] = None,
+    fast: Annotated[
+        bool,
+        typer.Option(
+            "--fast",
+            help="Render animation faster at 15 fps and encode with veryfast preset.",
+        ),
+    ] = False,
+    anim_fps: Annotated[
+        int | None,
+        typer.Option(
+            "--anim-fps",
+            help="Animation rendering frame rate (10 to 30).",
+        ),
+    ] = None,
 ) -> None:
     """Generate a narrated demo video from a public GitHub repository URL."""
     setup_logging(verbose=verbose)
 
-    clean_theme, clean_accent, clean_provider, clean_speed = _validate_options(
+    (
+        clean_theme,
+        clean_accent,
+        clean_provider,
+        clean_speed,
+        clean_captions,
+        clean_music,
+        clean_anim_fps,
+    ) = _validate_options(
         theme=theme,
         accent=accent,
         provider=provider,
         voice_speed=voice_speed,
+        captions=captions,
+        music=music,
+        anim_fps=anim_fps,
     )
 
     base_settings = get_settings()
@@ -273,6 +416,8 @@ def make(
         provider=clean_provider,
         model=model,
         voice_speed=clean_speed,
+        anim_fps=clean_anim_fps,
+        fast=fast,
     )
 
     tracker = _StageProgressTracker()
@@ -283,7 +428,15 @@ def make(
         reuse=reuse,
         force=force,
         keep_temp=keep_temp,
+        no_media=no_media,
+        no_animation=no_animation,
+        no_transitions=no_transitions,
+        captions=clean_captions,
+        music=clean_music,
+        fast=fast,
+        anim_fps=clean_anim_fps,
         on_stage=tracker.on_stage,
+        on_scene=tracker.on_scene,
     )
 
     t_start = time.monotonic()
@@ -296,7 +449,7 @@ def make(
         )
         tracker.finish()
         total_time = time.monotonic() - t_start
-        _print_summary(result, total_time)
+        _print_summary(result, total_time, no_media=no_media)
         final_path = result.video if result.video is not None else result.scenes_json
         typer.echo(str(final_path))
     except Repo2VideoError as exc:
@@ -389,24 +542,85 @@ def render(
             help="Enable verbose debug logging.",
         ),
     ] = False,
+    no_media: Annotated[
+        bool,
+        typer.Option(
+            "--no-media",
+            help="Skip downloading and displaying repository screenshots and clips.",
+        ),
+    ] = False,
+    no_animation: Annotated[
+        bool,
+        typer.Option(
+            "--no-animation",
+            help="Render animated scenes as static snapshots instead of video clips.",
+        ),
+    ] = False,
+    no_transitions: Annotated[
+        bool,
+        typer.Option(
+            "--no-transitions",
+            help="Disable crossfade transitions between scenes.",
+        ),
+    ] = False,
+    captions: Annotated[
+        str,
+        typer.Option(
+            "--captions",
+            help="Subtitle caption mode ('off', 'srt', or 'burn').",
+        ),
+    ] = "srt",
+    music: Annotated[
+        Path | None,
+        typer.Option(
+            "--music",
+            help="Path to background music audio file.",
+        ),
+    ] = None,
+    fast: Annotated[
+        bool,
+        typer.Option(
+            "--fast",
+            help="Render animation faster at 15 fps and encode with veryfast preset.",
+        ),
+    ] = False,
+    anim_fps: Annotated[
+        int | None,
+        typer.Option(
+            "--anim-fps",
+            help="Animation rendering frame rate (10 to 30).",
+        ),
+    ] = None,
 ) -> None:
     """Render slides, voice, and video from an existing or hand-edited scenes.json script."""
     setup_logging(verbose=verbose)
 
-    clean_theme, clean_accent, _, clean_speed = _validate_options(
+    (
+        clean_theme,
+        clean_accent,
+        _,
+        clean_speed,
+        clean_captions,
+        clean_music,
+        clean_anim_fps,
+    ) = _validate_options(
         theme=theme,
         accent=accent,
         provider=None,
         voice_speed=voice_speed,
+        captions=captions,
+        music=music,
+        anim_fps=anim_fps,
     )
 
     base_settings = get_settings()
     settings = _apply_settings_overrides(
         base_settings,
         voice_speed=clean_speed,
+        anim_fps=clean_anim_fps,
+        fast=fast,
     )
 
-    # Determine scenes_file and fallback repo_label
     resolved_path = path.resolve()
     scenes_file = resolved_path / "scenes.json" if resolved_path.is_dir() else resolved_path
     work_dir = scenes_file.parent
@@ -437,7 +651,15 @@ def render(
         reuse=False,
         force=force,
         keep_temp=False,
+        no_media=no_media,
+        no_animation=no_animation,
+        no_transitions=no_transitions,
+        captions=clean_captions,
+        music=clean_music,
+        fast=fast,
+        anim_fps=clean_anim_fps,
         on_stage=tracker.on_stage,
+        on_scene=tracker.on_scene,
     )
 
     t_start = time.monotonic()
@@ -451,7 +673,7 @@ def render(
         )
         tracker.finish()
         total_time = time.monotonic() - t_start
-        _print_summary(result, total_time)
+        _print_summary(result, total_time, no_media=no_media)
         typer.echo(str(result.video))
     except Repo2VideoError as exc:
         if verbose:
@@ -504,8 +726,13 @@ def doctor(
     for c in checks:
         if c.name == "GITHUB_TOKEN":
             typer.echo(f"GITHUB_TOKEN: {c.status}")
-        elif c.ok:
+        elif c.status == "OK":
             typer.secho(f"{c.name}: OK", fg=typer.colors.GREEN)
+        elif c.status == "WARN":
+            msg = f"{c.name}: WARN"
+            if c.hint:
+                msg += f" - Hint: {c.hint}"
+            typer.secho(msg, fg=typer.colors.YELLOW)
         else:
             if c.required:
                 all_ok = False

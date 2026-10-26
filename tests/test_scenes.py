@@ -219,6 +219,71 @@ class TestBuildHtmlFast:
         assert "Star it on GitHub" in html_doc
         assert "myorg/myproject" in html_doc
 
+    def test_new_scene_types_render_with_feature_layout(self) -> None:
+        """Verify new v2 scene types render with feature layout (badge and bullets) as fallbacks."""
+        from repo2video.models import ArchitectureSpec, NodeSpec
+
+        narr = (
+            "This is a standard narration sentence designed for testing automated slide "
+            "creation, layout fitting, and rendering pipelines."
+        )
+        scenes = [
+            Scene(
+                id=1,
+                type="code",
+                heading="Heading for code",
+                bullets=["Code fallback"],
+                narration=narr,
+                code="print('hi')",
+                file_id="f1",
+            ),
+            Scene(
+                id=2,
+                type="terminal",
+                heading="Heading for terminal",
+                bullets=["Terminal fallback"],
+                narration=narr,
+                code="ls -la",
+                terminal_id="t1",
+            ),
+            Scene(
+                id=3,
+                type="architecture",
+                heading="Heading for architecture",
+                bullets=["Arch fallback"],
+                narration=narr,
+                architecture=ArchitectureSpec(
+                    nodes=[
+                        NodeSpec(id="n1", label="Input", group="input"),
+                        NodeSpec(id="n2", label="Core", group="core"),
+                        NodeSpec(id="n3", label="Output", group="output"),
+                    ]
+                ),
+            ),
+            Scene(
+                id=4,
+                type="stats",
+                heading="Heading for stats",
+                bullets=["Stats fallback"],
+                narration=narr,
+                stat_keys=["stars", "forks"],
+            ),
+            Scene(
+                id=5,
+                type="media",
+                heading="Heading for media",
+                bullets=["Media fallback"],
+                narration=narr,
+                media_id="m1",
+            ),
+        ]
+        for scene in scenes:
+            html_doc = build_html(scene, 2, 5, repo_label="owner/repo")
+            assert scene.heading in html_doc
+            assert "feature-bullets" in html_doc
+            assert "feature-badge" in html_doc
+            assert scene.bullets[0] in html_doc
+
 
 # ==============================================================================
 # 2. Slow test with Playwright browser

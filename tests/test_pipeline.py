@@ -27,7 +27,7 @@ from repo2video.pipeline import (
     render_only,
     run,
 )
-from repo2video.render import SceneAssets
+from repo2video.render import SceneAssets, SceneVisual
 from repo2video.voice import SceneAudio
 
 
@@ -148,6 +148,37 @@ def mock_pipeline_environment(
         calls.append("script")
         return sample_script_data
 
+    def fake_collect_media(
+        repo: RepoData,
+        work_dir: Path,
+        settings: Settings,
+        force: bool = False,
+    ) -> list[Any]:
+        calls.append("media")
+        return []
+
+    def fake_render_visuals(
+        script_data: ScriptData,
+        repo_data: RepoData,
+        media_assets: list[Any],
+        work_dir: Path,
+        audios: list[SceneAudio],
+        settings: Settings,
+        options: PipelineOptions,
+        *,
+        render_options: Any,
+        on_scene: Any = None,
+    ) -> tuple[list[SceneVisual], list[dict[str, Any]], str | None]:
+        from repo2video.render import SceneVisual
+
+        calls.append("visuals")
+        (work_dir / "slides").mkdir(parents=True, exist_ok=True)
+        visuals = [
+            SceneVisual(kind="image", image=work_dir / "slides" / f"scene_{s.id:02d}.png")
+            for s in script_data.scenes
+        ]
+        return visuals, [], None
+
     def fake_render_scenes(
         script: ScriptData,
         out_dir: Path,
@@ -202,8 +233,10 @@ def mock_pipeline_environment(
         }
 
     monkeypatch.setattr("repo2video.pipeline.analyze", fake_analyze)
+    monkeypatch.setattr("repo2video.pipeline.collect_media", fake_collect_media)
     monkeypatch.setattr("repo2video.pipeline.write_script", fake_write_script)
     monkeypatch.setattr("repo2video.pipeline.render_scenes", fake_render_scenes)
+    monkeypatch.setattr("repo2video.pipeline._render_visuals", fake_render_visuals)
     monkeypatch.setattr("repo2video.pipeline.synthesize_all", fake_synthesize_all)
     monkeypatch.setattr("repo2video.pipeline.render_video", fake_render_video)
     monkeypatch.setattr("repo2video.pipeline.probe_video", fake_probe_video)
@@ -239,11 +272,12 @@ def test_pipeline_stage_ordering_and_progress_callback(
 
     # Check progress callbacks
     assert stage_events == [
-        ("analyze", 1, 5),
-        ("script", 2, 5),
-        ("slides", 3, 5),
-        ("voice", 4, 5),
-        ("render", 5, 5),
+        ("analyze", 1, 6),
+        ("media", 2, 6),
+        ("script", 3, 6),
+        ("voice", 4, 6),
+        ("visuals", 5, 6),
+        ("render", 6, 6),
     ]
 
     # Check execution sequence in calls
@@ -253,9 +287,10 @@ def test_pipeline_stage_ordering_and_progress_callback(
         "piper_check_ready",
         "check_ffmpeg",
         "analyze",
+        "media",
         "script",
-        "slides",
         "voice",
+        "visuals",
         "render",
     ]
     assert calls == expected_calls
@@ -268,7 +303,7 @@ def test_pipeline_stage_ordering_and_progress_callback(
     assert result.video is not None and result.video.is_file()
     assert result.captions is not None and result.captions.is_file()
     assert result.duration_seconds == 6.0
-    for stage in ["analyze", "script", "slides", "voice", "render"]:
+    for stage in ["analyze", "media", "script", "voice", "visuals", "render"]:
         assert stage in result.timings
         assert result.timings[stage] >= 0.0
 
@@ -287,8 +322,9 @@ def test_pipeline_script_only(
     result = run("https://github.com/test-owner/demo-repo", settings=settings, options=options)
 
     assert stage_events == [
-        ("analyze", 1, 2),
-        ("script", 2, 2),
+        ("analyze", 1, 3),
+        ("media", 2, 3),
+        ("script", 3, 3),
     ]
 
     calls: list[str] = mock_pipeline_environment["calls"]
@@ -296,7 +332,7 @@ def test_pipeline_script_only(
     assert "llm_check_ready" in calls
     assert "piper_check_ready" not in calls
     assert "check_ffmpeg" not in calls
-    assert "slides" not in calls
+    assert "visuals" not in calls
     assert "voice" not in calls
     assert "render" not in calls
 
@@ -471,8 +507,8 @@ def test_render_only_accepts_file_and_folder(
         settings=settings,
     )
     assert res1.video is not None and res1.video.is_file()
-    assert "slides" in res1.timings
     assert "voice" in res1.timings
+    assert "visuals" in res1.timings
     assert "render" in res1.timings
 
     # 2. Test passing the folder containing scenes.json
@@ -557,7 +593,7 @@ def test_check_doctor_all_ok(
     monkeypatch.setattr("repo2video.pipeline.check_chromium", lambda: "/path/to/chrome")
 
     checks: list[DoctorCheck] = check_doctor(settings)
-    assert len(checks) == 6
+    assert len(checks) == 10
     for c in checks:
         if c.name == "GITHUB_TOKEN":
             assert c.status == "set"

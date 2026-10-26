@@ -9,8 +9,9 @@ import logging
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from playwright.sync_api import Route, sync_playwright
 
@@ -225,7 +226,7 @@ def build_html(
         </div>
         """
 
-    elif scene_type == "feature":
+    elif scene_type in ("feature", "media", "code", "terminal", "architecture", "stats"):
         bullet_items = "".join(
             f'<div class="feature-item"><span class="feature-badge">{i}</span><span class="feature-text">{b}</span></div>'
             for i, b in enumerate(escaped_bullets, start=1)
@@ -896,6 +897,107 @@ def render_scenes(
         pw.stop()
 
     return png_paths
+
+
+def screenshot_html(
+    html_content: str,
+    path: Path,
+    settings: Settings | None = None,
+    *,
+    page: Any = None,
+) -> Path:
+    """Render a standalone HTML document string to a PNG slide using Playwright Chromium.
+
+    Blocks all external network traffic except data: and about: schemes,
+    waits for fonts and auto-fit evaluation, and takes a full viewport screenshot.
+
+    Args:
+        html_content: Standalone HTML document markup string.
+        path: Destination path for the rendered PNG file.
+        settings: Application settings. Defaults to get_settings().
+        page: Optional existing Playwright Page to reuse.
+
+    Returns:
+        Path to the rendered PNG image.
+
+    Raises:
+        SceneError: If Playwright fails to launch or screenshot capture fails.
+    """
+    cfg = settings if settings is not None else get_settings()
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if page is not None:
+        try:
+            page.set_content(html_content, wait_until="load")
+            page.evaluate("() => document.fonts.ready")
+            try:
+                page.wait_for_function("() => window.__fitted === true", timeout=3000)
+            except Exception:  # noqa: BLE001, S110
+                pass
+            page.screenshot(path=str(path), type="png", full_page=False)
+            return path
+        except Exception as exc:
+            if isinstance(exc, SceneError):
+                raise
+            raise SceneError(
+                f"Failed to screenshot HTML: {exc}",
+                hint="Ensure Playwright Chromium is installed: `playwright install chromium`.",
+            ) from exc
+
+    def _do_screenshot() -> None:
+        pw = sync_playwright().start()
+        browser = None
+        try:
+            browser = pw.chromium.launch(headless=True)
+            p = browser.new_page(
+                viewport={"width": cfg.video_width, "height": cfg.video_height},
+                device_scale_factor=1,
+            )
+
+            def _filter_route(route: Route) -> None:
+                url = route.request.url.lower()
+                if url.startswith(("data:", "about:")):
+                    route.continue_()
+                else:
+                    route.abort()
+
+            p.route("**/*", _filter_route)
+            p.set_content(html_content, wait_until="load")
+            p.evaluate("() => document.fonts.ready")
+            try:
+                p.wait_for_function("() => window.__fitted === true", timeout=3000)
+            except Exception:  # noqa: BLE001, S110
+                pass
+            p.screenshot(path=str(path), type="png", full_page=False)
+        finally:
+            if browser is not None:
+                browser.close()
+            pw.stop()
+
+    try:
+        _do_screenshot()
+    except Exception as exc:
+        if "asyncio loop" in str(exc) or "already running" in str(exc):
+            try:
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    pool.submit(_do_screenshot).result()
+            except Exception as pool_exc:
+                if isinstance(pool_exc, SceneError):
+                    raise
+                raise SceneError(
+                    f"Failed to screenshot HTML in worker thread: {pool_exc}",
+                    hint="Ensure Playwright Chromium is installed: `playwright install chromium`.",
+                ) from pool_exc
+        elif isinstance(exc, SceneError):
+            raise
+        else:
+            raise SceneError(
+                f"Failed to screenshot HTML: {exc}",
+                hint="Ensure Playwright Chromium is installed: `playwright install chromium`.",
+            ) from exc
+
+    return path
 
 
 def main() -> None:
