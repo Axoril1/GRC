@@ -26,6 +26,7 @@ dev = [
 ]
 
 [project.scripts]
+grc = "repo2video.cli:app"
 repo2video = "repo2video.cli:app"
 
 [tool.setuptools.packages.find]

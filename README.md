@@ -1,8 +1,8 @@
-# repo2video
+# GRC
 
 Turn any public GitHub repository into a narrated demo video (MP4) in minutes.
 
-`repo2video` analyzes repository metadata, code, terminals, and visuals, drafts a narrated script via a local LLM, synthesizes voiceover using Piper, generates deterministic animations using Playwright Chromium, and composites the final MP4 with FFmpeg—100% free and open-source, running locally on a standard laptop without GPU, Docker, or paid APIs.
+`GRC` analyzes repository metadata, code, terminals, and visuals, drafts a narrated script via an LLM, synthesizes voiceover using Piper, generates deterministic animations using Playwright Chromium, and composites the final MP4 with FFmpeg—100% free and open-source, running locally on a standard laptop without GPU, Docker, or paid APIs.
 
 ---
 
@@ -33,7 +33,7 @@ Turn any public GitHub repository into a narrated demo video (MP4) in minutes.
 
 Check your local environment readiness at any time:
 ```bash
-repo2video doctor
+grc doctor
 ```
 
 ---
@@ -41,8 +41,8 @@ repo2video doctor
 ## Installation
 
 ```bash
-git clone https://github.com/Axoril1/CodeScan_Ai.git repo2video
-cd repo2video
+git clone https://github.com/Axoril1/GRC.git
+cd GRC
 pip install -e .
 ```
 
@@ -52,22 +52,22 @@ pip install -e .
 
 Generate a video from a GitHub repository:
 ```bash
-repo2video make https://github.com/owner/repo
+grc make https://github.com/owner/repo
 ```
 
 Fast preview run (15 fps animations, fast encode):
 ```bash
-repo2video make https://github.com/owner/repo --fast
+grc make https://github.com/owner/repo --fast
 ```
 
 Script-only generation (stops after script stage):
 ```bash
-repo2video make https://github.com/owner/repo --script-only
+grc make https://github.com/owner/repo --script-only
 ```
 
 Re-render from an existing `scenes.json`:
 ```bash
-repo2video render ./output/owner__repo/scenes.json
+grc render ./output/owner__repo/scenes.json
 ```
 
 ---
@@ -101,10 +101,10 @@ repo2video render ./output/owner__repo/scenes.json
 
 ## What the Tool Downloads (Privacy & Security)
 
-Safety and user privacy are fundamental constraints of `repo2video`:
+Safety and user privacy are fundamental constraints of `GRC`:
 
 ### Network Connections
-`repo2video` only ever connects to the following network endpoints:
+`GRC` only ever connects to the following network endpoints:
 1. `api.github.com`: To fetch public repository metadata, directory trees, and README contents.
 2. **Configured LLM Address**: Local by default (`http://localhost:11434` for Ollama). If OpenAI is configured, connects to `api.openai.com`.
 3. **README Media Hosts**: Public image and video files directly referenced in the repository README.
@@ -125,4 +125,4 @@ Every visual element is optional. If an image download fails, an animated builde
 
 ## Visual Asset Attribution
 
-Images, logos, and video clips downloaded from a repository belong to their respective original authors. When media assets from a repository are used in the video, `repo2video` automatically appends an attribution credit line to the outro scene and records the credit in `run.json` (e.g. *"Visuals from the owner/repo README"*).
+Images, logos, and video clips downloaded from a repository belong to their respective original authors. When media assets from a repository are used in the video, `GRC` automatically appends an attribution credit line to the outro scene and records the credit in `run.json` (e.g. *"Visuals from the owner/repo README"*).
